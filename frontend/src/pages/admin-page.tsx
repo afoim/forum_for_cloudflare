@@ -28,7 +28,8 @@ export function AdminPage() {
 		notify_on_user_delete: false,
 		notify_on_username_change: false,
 		notify_on_avatar_change: false,
-		notify_on_manual_verify: false
+		notify_on_manual_verify: false,
+		session_ttl_days: '7'
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -69,7 +70,8 @@ export function AdminPage() {
 				notify_on_user_delete: !!settings.notify_on_user_delete,
 				notify_on_username_change: !!settings.notify_on_username_change,
 				notify_on_avatar_change: !!settings.notify_on_avatar_change,
-				notify_on_manual_verify: !!settings.notify_on_manual_verify
+				notify_on_manual_verify: !!settings.notify_on_manual_verify,
+				session_ttl_days: String(settings.session_ttl_days ?? 7)
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -87,10 +89,20 @@ export function AdminPage() {
 		setLoading(true);
 		setError('');
 		try {
+			const sessionTtlDays = Number.parseInt(systemSettings.session_ttl_days, 10);
+			if (!Number.isInteger(sessionTtlDays)) {
+				throw new Error('登录态有效天数必须为整数');
+			}
+			if (sessionTtlDays < 1 || sessionTtlDays > 365) {
+				throw new Error('登录态有效天数必须在 1 到 365 之间');
+			}
 			await apiFetch('/admin/settings', {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
-				body: JSON.stringify(systemSettings)
+				body: JSON.stringify({
+					...systemSettings,
+					session_ttl_days: sessionTtlDays
+				})
 			});
 			alert('设置已保存');
 		} catch (e: any) {
@@ -286,6 +298,19 @@ export function AdminPage() {
 									/>
 									启用 Cloudflare Turnstile
 								</label>
+								<div className="grid gap-2">
+									<Label htmlFor="session-ttl-days">登录态有效天数</Label>
+									<Input
+										id="session-ttl-days"
+										type="number"
+										min={1}
+										max={365}
+										step={1}
+										value={systemSettings.session_ttl_days}
+										onChange={(e) => setSystemSettings((s) => ({ ...s, session_ttl_days: e.target.value }))}
+									/>
+									<p className="text-xs text-muted-foreground">请输入 1 到 365 之间的整数天数。</p>
+								</div>
 								<Separator />
 								<div className="grid gap-3 sm:grid-cols-2">
 									<label className="flex items-center gap-2 text-sm">

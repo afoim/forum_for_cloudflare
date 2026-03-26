@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useConfig } from '@/hooks/use-config';
 import { apiFetch, formatDate, getSecurityHeaders, type Category, type Comment, type Post } from '@/lib/api';
-import { getToken, getUser } from '@/lib/auth';
+import { getToken, getUser, logout } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import { validateText } from '@/lib/validators';
 
@@ -184,15 +184,18 @@ export function PostPage() {
 		setCommentError('');
 		try {
 			const headers = getSecurityHeaders('POST', null);
-			console.log('Upload headers:', headers); // Debug log
 			const res = await fetch('/api/upload', {
 				method: 'POST',
 				headers: headers,
 				body: formData
 			});
+			if (res.status === 401) {
+				logout();
+				window.location.href = '/login';
+				return;
+			}
 			const data = (await res.json()) as any;
 			if (!res.ok) {
-				console.error('Upload failed:', res.status, data); // Debug log
 				throw new Error(data?.error || '上传失败');
 			}
 			const imageUrl = data.url;
@@ -476,33 +479,50 @@ export function PostPage() {
 								</div>
 
 								{isEditing ? (
-									<div className="space-y-3">
+									<div className="space-y-4">
 										{editError ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{editError}</div> : null}
-										<div className="space-y-2">
-											<Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={30} />
-										</div>
-										<div className="space-y-2">
-											<div className="flex items-center justify-end">
+										<div className="sticky top-20 z-20 rounded-md border bg-background/95 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+											<div className="flex flex-wrap items-center gap-2">
+												<Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+													<X className="h-4 w-4" />
+													<span>{'退出编辑模式'}</span>
+												</Button>
 												<Button type="button" variant="outline" size="sm" onClick={() => setEditPreviewOpen((v) => !v)}>
 													{editPreviewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-													<span className="sr-only">{editPreviewOpen ? '关闭预览' : '打开预览'}</span>
+													<span>{editPreviewOpen ? '关闭预览' : '打开预览'}</span>
+												</Button>
+												<Button onClick={saveEdit} disabled={editLoading} size="sm" className="ml-auto">
+													{editLoading ? '保存中...' : '保存'}
 												</Button>
 											</div>
-											<Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={10} />
 										</div>
-										{editPreviewOpen ? (
-											<div className="rounded-md border bg-muted/20 p-3">
-												<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
-												<div
-													ref={editPreviewRef}
-													className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
-													dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(editContent || '') }}
-												/>
+										<div className={`grid gap-4 ${editPreviewOpen ? 'lg:grid-cols-2' : 'lg:grid-cols-1'}`}>
+											<div className={`space-y-2 ${!editPreviewOpen ? 'lg:col-span-1' : ''}`}>
+												<Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={30} />
+												<div className={`${editPreviewOpen ? 'hidden lg:block' : ''}`}>
+													<div className="rounded-md border">
+														<Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={18} className="min-h-[24rem] resize-y border-0 shadow-none focus-visible:ring-0" />
+													</div>
+												</div>
+												{!editPreviewOpen ? (
+													<div className="lg:hidden">
+														<div className="rounded-md border">
+															<Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={18} className="min-h-[24rem] resize-y border-0 shadow-none focus-visible:ring-0" />
+														</div>
+													</div>
+												) : null}
 											</div>
-										) : null}
-										<Button onClick={saveEdit} disabled={editLoading}>
-											{editLoading ? '保存中...' : '保存'}
-										</Button>
+											{editPreviewOpen ? (
+												<div className="min-h-[24rem] rounded-md border bg-muted/20 p-3 lg:max-h-[calc(100dvh-16rem)] lg:overflow-auto">
+													<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
+													<div
+														ref={editPreviewRef}
+														className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+														dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(editContent || '') }}
+													/>
+												</div>
+											) : null}
+										</div>
 									</div>
 								) : (
 									<div

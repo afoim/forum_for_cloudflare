@@ -123,6 +123,19 @@ export default {
 			});
 		};
 
+		const DEFAULT_SESSION_TTL_DAYS = 7;
+		const SESSION_TTL_SETTING_KEY = 'session_ttl_days';
+		const MAX_SESSION_TTL_DAYS = 365;
+		const normalizeSessionTtlDays = (value: unknown): number => {
+			const parsed = Number.parseInt(String(value ?? ''), 10);
+			if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_SESSION_TTL_DAYS;
+			return parsed;
+		};
+		const getSessionTtlDays = async (): Promise<number> => {
+			const setting = await env.forum_db.prepare('SELECT value FROM settings WHERE key = ?').bind(SESSION_TTL_SETTING_KEY).first();
+			return normalizeSessionTtlDays(setting?.value);
+		};
+
 		// Helper to handle errors
 		const handleError = (e: any) => {
 			const errString = String(e);
@@ -194,21 +207,26 @@ export default {
 				const userPayload = await authenticate(request);
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
-				const settings = await env.forum_db.prepare("SELECT key, value FROM settings").all();
+				const [settings, sessionTtlDays] = await Promise.all([
+					env.forum_db.prepare("SELECT key, value FROM settings").all(),
+					getSessionTtlDays()
+				]);
 				const config: any = {
 					turnstile_enabled: false,
 					notify_on_user_delete: false,
 					notify_on_username_change: false,
 					notify_on_avatar_change: false,
-					notify_on_manual_verify: false
+					notify_on_manual_verify: false,
+					session_ttl_days: sessionTtlDays
 				};
-				
+
 				if (settings.results) {
 					for (const row of settings.results) {
+						if (row.key === SESSION_TTL_SETTING_KEY) continue;
 						config[row.key as string] = row.value === '1';
 					}
 				}
-				
+
 				return jsonResponse(config);
 			} catch (e) {
 				return handleError(e);
@@ -222,8 +240,8 @@ export default {
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { turnstile_enabled, notify_on_user_delete, notify_on_username_change, notify_on_avatar_change, notify_on_manual_verify } = body;
-				
+				const { turnstile_enabled, notify_on_user_delete, notify_on_username_change, notify_on_avatar_change, notify_on_manual_verify, session_ttl_days } = body;
+
 				const stmt = env.forum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
 				const batch = [];
 
@@ -232,7 +250,14 @@ export default {
 				if (notify_on_username_change !== undefined) batch.push(stmt.bind('notify_on_username_change', notify_on_username_change ? '1' : '0'));
 				if (notify_on_avatar_change !== undefined) batch.push(stmt.bind('notify_on_avatar_change', notify_on_avatar_change ? '1' : '0'));
 				if (notify_on_manual_verify !== undefined) batch.push(stmt.bind('notify_on_manual_verify', notify_on_manual_verify ? '1' : '0'));
-				
+				if (session_ttl_days !== undefined) {
+					const parsedSessionTtlDays = Number.parseInt(String(session_ttl_days), 10);
+					if (!Number.isInteger(parsedSessionTtlDays) || parsedSessionTtlDays < 1 || parsedSessionTtlDays > MAX_SESSION_TTL_DAYS) {
+						return jsonResponse({ error: `登录态有效天数必须是 1 到 ${MAX_SESSION_TTL_DAYS} 的整数` }, 400);
+					}
+					batch.push(stmt.bind(SESSION_TTL_SETTING_KEY, String(parsedSessionTtlDays)));
+				}
+
 				if (batch.length > 0) await env.forum_db.batch(batch);
 
 				return jsonResponse({ success: true });
@@ -241,6 +266,23 @@ export default {
 			}
 		}
 		
+		// GET /api/session
+		if (url.pathname === '/api/session' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				return jsonResponse({
+					valid: true,
+					user: {
+						id: userPayload.id,
+						email: userPayload.email,
+						role: userPayload.role
+					}
+				});
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
 		// Helper to check Turnstile if enabled
 		const checkTurnstile = async (reqBody: any, ip: string) => {
 			const setting = await env.forum_db.prepare("SELECT value FROM settings WHERE key = 'turnstile_enabled'").first();
@@ -342,11 +384,16 @@ export default {
 					}
 				}
 
-				const { token, jti, expiresAt } = await security.generateToken({
-					id: user.id,
-					role: user.role || 'user',
-					email: user.email
-				});
+				const sessionTtlDays = await getSessionTtlDays();
+				const sessionTtlSeconds = sessionTtlDays * 24 * 60 * 60;
+				const { token, jti, expiresAt } = await security.generateToken(
+					{
+						id: user.id,
+						role: user.role || 'user',
+						email: user.email
+					},
+					sessionTtlSeconds
+				);
 
 				await env.forum_db.prepare('INSERT INTO sessions (jti, user_id, expires_at) VALUES (?, ?, ?)').bind(jti, user.id, expiresAt).run();
 				await security.logAudit(user.id, 'LOGIN', 'user', String(user.id), { email }, request);

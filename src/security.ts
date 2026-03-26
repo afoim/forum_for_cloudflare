@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 
 const NONCE_TTL = 300; // 5 minutes in seconds
+const DEFAULT_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface UserPayload {
     id: number;
@@ -23,14 +24,15 @@ export class Security {
     }
 
     // 1. Generate JWT Token
-    async generateToken(user: UserPayload): Promise<{ token: string; jti: string; expiresAt: number }> {
+    async generateToken(user: UserPayload, ttlSeconds = DEFAULT_SESSION_TTL_SECONDS): Promise<{ token: string; jti: string; expiresAt: number }> {
+        const normalizedTtlSeconds = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? Math.floor(ttlSeconds) : DEFAULT_SESSION_TTL_SECONDS;
         const jti = crypto.randomUUID();
-        const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+        const expiresAt = Math.floor(Date.now() / 1000) + normalizedTtlSeconds;
         const token = await new SignJWT({ ...user })
             .setProtectedHeader({ alg: 'HS256' })
             .setJti(jti)
             .setIssuedAt()
-            .setExpirationTime('24h') // 24 hours validity
+            .setExpirationTime(expiresAt)
             .sign(this.secret);
         return { token, jti, expiresAt };
     }

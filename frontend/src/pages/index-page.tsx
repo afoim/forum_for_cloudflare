@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useConfig } from '@/hooks/use-config';
 import { apiFetch, formatDate, getSecurityHeaders, type Category, type Post } from '@/lib/api';
-import { getToken, getUser } from '@/lib/auth';
+import { getToken, getUser, logout } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import { validateText } from '@/lib/validators';
 
@@ -230,15 +230,18 @@ export function IndexPage() {
 		setCreateError('');
 		try {
 			const headers = getSecurityHeaders('POST', null);
-			console.log('Upload headers:', headers); // Debug log
 			const res = await fetch('/api/upload', {
 				method: 'POST',
 				headers: headers,
 				body: formData
 			});
+			if (res.status === 401) {
+				logout();
+				window.location.href = '/login';
+				return;
+			}
 			const data = (await res.json()) as any;
 			if (!res.ok) {
-				console.error('Upload failed:', res.status, data); // Debug log
 				throw new Error(data?.error || '上传失败');
 			}
 			const imageUrl = data.url;
@@ -427,6 +430,21 @@ export function IndexPage() {
 							) : (
 								<form className="space-y-4" onSubmit={createPost}>
 								{createError ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{createError}</div> : null}
+								<div className="sticky top-20 z-20 rounded-md border bg-background/95 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+									<div className="flex flex-wrap items-center gap-2">
+										<Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>
+											<ChevronUp className="h-4 w-4" />
+											<span>收起编辑器</span>
+										</Button>
+										<Button type="button" variant="outline" size="sm" onClick={() => setPreviewOpen((v) => !v)}>
+											{previewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+											<span>{previewOpen ? '关闭预览' : '打开预览'}</span>
+										</Button>
+										<Button type="submit" disabled={createLoading} size="sm" className="ml-auto">
+											{createLoading ? '发布中...' : '发布'}
+										</Button>
+									</div>
+								</div>
 								<div className="space-y-4">
 									<div className="space-y-2">
 										<Label htmlFor="new-title">标题</Label>
@@ -448,11 +466,12 @@ export function IndexPage() {
 											))}
 										</select>
 									</div>
+									<TurnstileWidget enabled={enabled} siteKey={siteKey} onToken={setTurnstileToken} resetKey={turnstileResetKey} />
 								</div>
-								<div className="space-y-2">
-									<div className="flex items-center justify-between gap-2">
-										<Label htmlFor="new-content">内容 (支持 Markdown)</Label>
-										<div className="flex items-center gap-2">
+								<div className={`grid gap-4 ${previewOpen ? 'lg:grid-cols-2' : 'lg:grid-cols-1'}`}>
+									<div className="space-y-2">
+										<div className="flex items-center justify-between gap-2">
+											<Label htmlFor="new-content">内容 (支持 Markdown)</Label>
 											<label className="cursor-pointer">
 												<input
 													type="file"
@@ -471,30 +490,31 @@ export function IndexPage() {
 													</span>
 												</Button>
 											</label>
-											<Button type="button" variant="outline" size="sm" onClick={() => setPreviewOpen((v) => !v)}>
-												{previewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-												<span className="sr-only">{previewOpen ? '关闭预览' : '打开预览'}</span>
-											</Button>
 										</div>
+										<div className={`${previewOpen ? 'hidden lg:block' : ''}`}>
+											<div className="rounded-md border">
+												<Textarea id="new-content" value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={18} required className="min-h-[24rem] resize-y border-0 shadow-none focus-visible:ring-0" />
+											</div>
+										</div>
+										{!previewOpen ? (
+											<div className="lg:hidden">
+												<div className="rounded-md border">
+													<Textarea id="new-content-mobile" value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={18} required className="min-h-[24rem] resize-y border-0 shadow-none focus-visible:ring-0" />
+												</div>
+											</div>
+										) : null}
 									</div>
-									<Textarea id="new-content" value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={8} required />
+									{previewOpen ? (
+										<div className="min-h-[24rem] rounded-md border bg-muted/20 p-3 lg:max-h-[calc(100dvh-16rem)] lg:overflow-auto">
+											<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
+											<div
+												ref={previewRef}
+												className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+												dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(newContent || '') }}
+											/>
+										</div>
+									) : null}
 								</div>
-								{previewOpen ? (
-									<div className="rounded-md border bg-muted/20 p-3">
-										<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
-										<div
-											ref={previewRef}
-											className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
-											dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(newContent || '') }}
-										/>
-									</div>
-								) : null}
-
-								<TurnstileWidget enabled={enabled} siteKey={siteKey} onToken={setTurnstileToken} resetKey={turnstileResetKey} />
-
-								<Button type="submit" disabled={createLoading}>
-									{createLoading ? '发布中...' : '发布'}
-								</Button>
 							</form>
 							)}
 						</CardContent>

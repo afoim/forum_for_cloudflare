@@ -88,6 +88,11 @@ export function SettingsPage() {
 				headers: getSecurityHeaders('POST', null),
 				body: formData
 			});
+			if (res.status === 401) {
+				logout();
+				window.location.href = '/login';
+				return;
+			}
 			const data = (await res.json()) as any;
 			if (!res.ok) throw new Error(data?.error || '上传失败');
 			setAvatarUrl(data.url);

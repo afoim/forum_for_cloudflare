@@ -6,6 +6,15 @@ export type ForumConfig = {
 	user_count?: number;
 };
 
+export type SessionInfo = {
+	valid: boolean;
+	user: {
+		id: number;
+		email: string;
+		role: string;
+	};
+};
+
 export type Category = {
 	id: number;
 	name: string;
@@ -68,6 +77,12 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 		throw new Error(data?.error || `请求失败 (${res.status})`);
 	}
 	return data as T;
+}
+
+export async function checkSession(): Promise<SessionInfo> {
+	return apiFetch<SessionInfo>('/session', {
+		headers: getSecurityHeaders('GET')
+	});
 }
 
 export function formatDate(dateString: string | null | undefined) {

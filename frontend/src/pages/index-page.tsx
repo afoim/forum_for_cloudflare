@@ -375,7 +375,7 @@ export function IndexPage() {
 				{banner ? <div className="rounded-md border bg-muted/40 p-3 text-sm">{banner}</div> : null}
 				<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 					<div className="min-w-0">
-						<h1 className="text-2xl font-semibold tracking-tight">D1 Forum</h1>
+						<h1 className="text-2xl font-semibold tracking-tight">{config?.site_name || 'D1 Forum'}</h1>
 						<p className="break-all text-sm text-muted-foreground">
 							开源：<a className="text-foreground underline" href="https://github.com/afoim/forum_for_cloudflare" target="_blank" rel="noopener noreferrer">https://github.com/afoim/forum_for_cloudflare</a> 基于 shadcn/ui + Tailwind 的多页应用（非 SPA），由 Cloudflare Workers 在边缘统一提供静态页面与 API。感谢 <a className="text-foreground underline" href="https://www.cloudflare.com" target="_blank" rel="noopener noreferrer">https://www.cloudflare.com</a> 提供的 CDN 与 DDoS 防护服务
 						</p>

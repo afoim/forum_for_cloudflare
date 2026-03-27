@@ -8,9 +8,13 @@ import { Home, LogIn, LogOut, Moon, Settings, Shield, Sun, User as UserIcon, Use
 
 export function SiteHeader({
 	currentUser,
+	siteName,
+	siteAvatarUrl,
 	onLogout
 }: {
 	currentUser: User | null;
+	siteName: string;
+	siteAvatarUrl: string;
 	onLogout?: () => void;
 }) {
 	const user = currentUser ?? getUser();
@@ -27,13 +31,19 @@ export function SiteHeader({
 	}, []);
 	return (
 		<header className="w-full border-b bg-background">
-			<div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-4 sm:gap-4">
+			<div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:gap-4">
 				<a
 					href="/"
-					className="inline-flex items-center justify-center rounded-md border border-transparent p-2 text-foreground hover:bg-muted/40"
+					className="inline-flex min-w-0 items-center gap-3 rounded-md border border-transparent px-2 py-1 text-foreground hover:bg-muted/40"
 				>
-					<Home className="h-5 w-5" />
-					<span className="sr-only">主页</span>
+					{siteAvatarUrl ? (
+						<img src={siteAvatarUrl} alt="" className="h-9 w-9 rounded-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+					) : (
+						<span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+							<Home className="h-5 w-5" />
+						</span>
+					)}
+					<span className="min-w-0 truncate text-sm font-semibold sm:text-base">{siteName}</span>
 				</a>
 				<div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
 					<Button type="button" variant="ghost" size="sm" onClick={toggleTheme}>

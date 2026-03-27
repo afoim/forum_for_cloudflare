@@ -3,7 +3,20 @@ import { getToken, logout } from '@/lib/auth';
 export type ForumConfig = {
 	turnstile_enabled: boolean;
 	turnstile_site_key: string;
+	site_name: string;
+	site_avatar_url: string;
 	user_count?: number;
+};
+
+export type AdminSettings = {
+	turnstile_enabled: boolean;
+	notify_on_user_delete: boolean;
+	notify_on_username_change: boolean;
+	notify_on_avatar_change: boolean;
+	notify_on_manual_verify: boolean;
+	session_ttl_days: number;
+	site_name: string;
+	site_avatar_url: string;
 };
 
 export type SessionInfo = {

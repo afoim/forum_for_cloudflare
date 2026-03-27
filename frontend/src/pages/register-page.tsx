@@ -10,6 +10,8 @@ import { getSecurityHeaders } from '@/lib/api';
 
 export function RegisterPage() {
 	const { config } = useConfig();
+	const siteName = config?.site_name || 'D1 Forum';
+	const siteAvatarUrl = config?.site_avatar_url || '';
 	const [email, setEmail] = React.useState('');
 	const [username, setUsername] = React.useState('');
 	const [password, setPassword] = React.useState('');
@@ -64,7 +66,18 @@ export function RegisterPage() {
 
 	return (
 		<div className="min-h-dvh bg-muted/20">
-			<main className="mx-auto flex max-w-5xl justify-center px-4 py-10">
+			<main className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-6 px-4 py-10">
+				<a href="/" className="inline-flex items-center gap-3 text-foreground">
+					{siteAvatarUrl ? (
+						<img src={siteAvatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+					) : (
+						<div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-semibold">站</div>
+					)}
+					<div className="text-left">
+						<div className="text-lg font-semibold">{siteName}</div>
+						<div className="text-sm text-muted-foreground">创建你的账号</div>
+					</div>
+				</a>
 				<Card className="w-full max-w-md">
 					<CardHeader>
 						<CardTitle>注册</CardTitle>

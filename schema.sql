@@ -109,6 +109,8 @@ CREATE TABLE audit_logs (
 );
 
 INSERT INTO settings (key, value) VALUES ('turnstile_enabled', '0');
+INSERT INTO settings (key, value) VALUES ('site_name', 'D1 Forum');
+INSERT INTO settings (key, value) VALUES ('site_avatar_url', '');
 
 -- Insert some dummy data
 -- Admin user (admin@example.com / password123)

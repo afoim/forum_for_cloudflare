@@ -357,8 +357,19 @@ export default {
 		};
 
 		const DEFAULT_SESSION_TTL_DAYS = 7;
+		const DEFAULT_SITE_NAME = 'D1 Forum';
 		const SESSION_TTL_SETTING_KEY = 'session_ttl_days';
+		const SITE_NAME_SETTING_KEY = 'site_name';
+		const SITE_AVATAR_URL_SETTING_KEY = 'site_avatar_url';
 		const MAX_SESSION_TTL_DAYS = 365;
+		const MAX_SITE_NAME_LENGTH = 60;
+		const BOOLEAN_SETTING_KEYS = new Set([
+			'turnstile_enabled',
+			'notify_on_user_delete',
+			'notify_on_username_change',
+			'notify_on_avatar_change',
+			'notify_on_manual_verify'
+		]);
 		const normalizeSessionTtlDays = (value: unknown): number => {
 			const parsed = Number.parseInt(String(value ?? ''), 10);
 			if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_SESSION_TTL_DAYS;
@@ -367,6 +378,48 @@ export default {
 		const getSessionTtlDays = async (): Promise<number> => {
 			const setting = await env.forum_db.prepare('SELECT value FROM settings WHERE key = ?').bind(SESSION_TTL_SETTING_KEY).first();
 			return normalizeSessionTtlDays(setting?.value);
+		};
+		const normalizeSiteName = (value: unknown): string => {
+			const next = String(value ?? '').trim();
+			if (!next) return DEFAULT_SITE_NAME;
+			return next.slice(0, MAX_SITE_NAME_LENGTH);
+		};
+		const normalizeSiteAvatarUrl = (value: unknown): string => String(value ?? '').trim();
+		const isValidSiteAvatarUrl = (value: string): boolean => {
+			if (!value) return true;
+			if (value.startsWith('/')) return true;
+			try {
+				const parsed = new URL(value);
+				return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+			} catch {
+				return false;
+			}
+		};
+		const getSiteBranding = async (): Promise<{ siteName: string; siteAvatarUrl: string }> => {
+			const settings = await env.forum_db
+				.prepare(`SELECT key, value FROM settings WHERE key IN (?, ?)`)
+				.bind(SITE_NAME_SETTING_KEY, SITE_AVATAR_URL_SETTING_KEY)
+				.all<{ key: string; value: string | null }>();
+			let siteName = DEFAULT_SITE_NAME;
+			let siteAvatarUrl = '';
+			for (const row of settings.results ?? []) {
+				if (row.key === SITE_NAME_SETTING_KEY) siteName = normalizeSiteName(row.value);
+				if (row.key === SITE_AVATAR_URL_SETTING_KEY) siteAvatarUrl = normalizeSiteAvatarUrl(row.value);
+			}
+			return { siteName, siteAvatarUrl };
+		};
+		const getPageTitle = (pathname: string, siteName: string): string => {
+			const pageTitle =
+				pathname === '/' ? '首页' :
+				pathname === '/login' ? '登录' :
+				pathname === '/register' ? '注册' :
+				pathname === '/forgot' ? '忘记密码' :
+				pathname === '/reset' ? '重置密码' :
+				pathname === '/settings' ? '设置' :
+				pathname === '/admin' ? '管理后台' :
+				pathname === '/post' ? '帖子详情' :
+				'';
+			return pageTitle ? `${pageTitle} - ${siteName}` : siteName;
 		};
 		const sendEmailByTemplate = async (to: string, templateKey: string, payload: EmailTemplatePayload = {}) => {
 			const { message } = buildEmailTemplate(templateKey, url.origin, payload);
@@ -423,14 +476,17 @@ export default {
 		// GET /api/config
 		if (url.pathname === '/api/config' && method === 'GET') {
 			try {
-				const [setting, userCount] = await Promise.all([
+				const [setting, userCount, branding] = await Promise.all([
 					env.forum_db.prepare("SELECT value FROM settings WHERE key = 'turnstile_enabled'").first(),
-					env.forum_db.prepare('SELECT COUNT(*) as count FROM users').first('count')
+					env.forum_db.prepare('SELECT COUNT(*) as count FROM users').first('count'),
+					getSiteBranding()
 				]);
-				
+
 				return jsonResponse({
 					turnstile_enabled: setting ? setting.value === '1' : false,
 					turnstile_site_key: env.TURNSTILE_SITE_KEY || '',
+					site_name: branding.siteName,
+					site_avatar_url: branding.siteAvatarUrl,
 					user_count: userCount || 0
 				});
 			} catch (e) {
@@ -445,22 +501,34 @@ export default {
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const [settings, sessionTtlDays] = await Promise.all([
-					env.forum_db.prepare("SELECT key, value FROM settings").all(),
+					env.forum_db.prepare("SELECT key, value FROM settings").all<{ key: string; value: string | null }>(),
 					getSessionTtlDays()
 				]);
-				const config: any = {
+				const config: Record<string, unknown> = {
 					turnstile_enabled: false,
 					notify_on_user_delete: false,
 					notify_on_username_change: false,
 					notify_on_avatar_change: false,
 					notify_on_manual_verify: false,
-					session_ttl_days: sessionTtlDays
+					session_ttl_days: sessionTtlDays,
+					site_name: DEFAULT_SITE_NAME,
+					site_avatar_url: ''
 				};
 
 				if (settings.results) {
 					for (const row of settings.results) {
 						if (row.key === SESSION_TTL_SETTING_KEY) continue;
-						config[row.key as string] = row.value === '1';
+						if (row.key === SITE_NAME_SETTING_KEY) {
+							config.site_name = normalizeSiteName(row.value);
+							continue;
+						}
+						if (row.key === SITE_AVATAR_URL_SETTING_KEY) {
+							config.site_avatar_url = normalizeSiteAvatarUrl(row.value);
+							continue;
+						}
+						if (BOOLEAN_SETTING_KEYS.has(row.key)) {
+							config[row.key] = row.value === '1';
+						}
 					}
 				}
 
@@ -477,7 +545,16 @@ export default {
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { turnstile_enabled, notify_on_user_delete, notify_on_username_change, notify_on_avatar_change, notify_on_manual_verify, session_ttl_days } = body;
+				const {
+					turnstile_enabled,
+					notify_on_user_delete,
+					notify_on_username_change,
+					notify_on_avatar_change,
+					notify_on_manual_verify,
+					session_ttl_days,
+					site_name,
+					site_avatar_url
+				} = body;
 
 				const stmt = env.forum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
 				const batch = [];
@@ -493,6 +570,23 @@ export default {
 						return jsonResponse({ error: `登录态有效天数必须是 1 到 ${MAX_SESSION_TTL_DAYS} 的整数` }, 400);
 					}
 					batch.push(stmt.bind(SESSION_TTL_SETTING_KEY, String(parsedSessionTtlDays)));
+				}
+				if (site_name !== undefined) {
+					const normalizedSiteName = String(site_name ?? '').trim();
+					if (!normalizedSiteName) {
+						return jsonResponse({ error: '站点名称不能为空' }, 400);
+					}
+					if (normalizedSiteName.length > MAX_SITE_NAME_LENGTH) {
+						return jsonResponse({ error: `站点名称不能超过 ${MAX_SITE_NAME_LENGTH} 个字符` }, 400);
+					}
+					batch.push(stmt.bind(SITE_NAME_SETTING_KEY, normalizedSiteName));
+				}
+				if (site_avatar_url !== undefined) {
+					const normalizedSiteAvatarUrl = normalizeSiteAvatarUrl(site_avatar_url);
+					if (!isValidSiteAvatarUrl(normalizedSiteAvatarUrl)) {
+						return jsonResponse({ error: '站点头像 URL 必须是 http(s) 地址或以 / 开头的站内路径' }, 400);
+					}
+					batch.push(stmt.bind(SITE_AVATAR_URL_SETTING_KEY, normalizedSiteAvatarUrl));
 				}
 
 				if (batch.length > 0) await env.forum_db.batch(batch);
@@ -2239,13 +2333,35 @@ export default {
 				pathname === '/post' ? '/post.html' :
 				pathname;
 
+			const rewriteHtmlResponse = async (response: Response) => {
+				const contentType = response.headers.get('content-type') || '';
+				if (!contentType.toLowerCase().includes('text/html')) return response;
+				const { siteName, siteAvatarUrl } = await getSiteBranding();
+				const title = getPageTitle(pathname, siteName);
+				const rewriter = new HTMLRewriter()
+					.on('title', {
+						element(element) {
+							element.setInnerContent(title);
+						}
+					})
+					.on('link[rel="icon"]', {
+						element(element) {
+							if (siteAvatarUrl) {
+								element.setAttribute('href', siteAvatarUrl);
+							} else {
+								element.removeAttribute('href');
+							}
+						}
+					});
+				return rewriter.transform(response);
+			};
 			const assetUrl = new URL(request.url);
 			assetUrl.pathname = mapped;
 			const assetRes = await env.ASSETS.fetch(new Request(assetUrl, request));
-			if (assetRes.status !== 404) return assetRes;
+			if (assetRes.status !== 404) return rewriteHtmlResponse(assetRes);
 			if (mapped !== pathname) {
 				const directRes = await env.ASSETS.fetch(request);
-				if (directRes.status !== 404) return directRes;
+				if (directRes.status !== 404) return rewriteHtmlResponse(directRes);
 			}
 			return new Response('Not Found', { status: 404 });
 		}

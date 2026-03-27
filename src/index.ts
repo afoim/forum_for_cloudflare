@@ -358,11 +358,17 @@ export default {
 
 		const DEFAULT_SESSION_TTL_DAYS = 7;
 		const DEFAULT_SITE_NAME = 'D1 Forum';
+		const DEFAULT_HOME_INTRO_MARKDOWN =
+			'开源：[https://github.com/afoim/forum_for_cloudflare](https://github.com/afoim/forum_for_cloudflare) 基于 shadcn/ui + Tailwind 的多页应用（非 SPA），由 Cloudflare Workers 在边缘统一提供静态页面与 API。感谢 [https://www.cloudflare.com](https://www.cloudflare.com) 提供的 CDN 与 DDoS 防护服务';
+		const DEFAULT_SITE_FOOTER_MARKDOWN = '';
 		const SESSION_TTL_SETTING_KEY = 'session_ttl_days';
 		const SITE_NAME_SETTING_KEY = 'site_name';
 		const SITE_AVATAR_URL_SETTING_KEY = 'site_avatar_url';
+		const HOME_INTRO_MARKDOWN_SETTING_KEY = 'home_intro_markdown';
+		const SITE_FOOTER_MARKDOWN_SETTING_KEY = 'site_footer_markdown';
 		const MAX_SESSION_TTL_DAYS = 365;
 		const MAX_SITE_NAME_LENGTH = 60;
+		const MAX_MARKDOWN_SETTING_LENGTH = 5000;
 		const BOOLEAN_SETTING_KEYS = new Set([
 			'turnstile_enabled',
 			'notify_on_user_delete',
@@ -384,6 +390,11 @@ export default {
 			if (!next) return DEFAULT_SITE_NAME;
 			return next.slice(0, MAX_SITE_NAME_LENGTH);
 		};
+		const normalizeMarkdownSetting = (value: unknown, fallback = ''): string => {
+			const next = typeof value === 'string' ? value : String(value ?? '');
+			if (!next) return fallback;
+			return next.slice(0, MAX_MARKDOWN_SETTING_LENGTH);
+		};
 		const normalizeSiteAvatarUrl = (value: unknown): string => String(value ?? '').trim();
 		const isValidSiteAvatarUrl = (value: string): boolean => {
 			if (!value) return true;
@@ -395,18 +406,27 @@ export default {
 				return false;
 			}
 		};
-		const getSiteBranding = async (): Promise<{ siteName: string; siteAvatarUrl: string }> => {
+		const getSiteConfig = async (): Promise<{
+			siteName: string;
+			siteAvatarUrl: string;
+			homeIntroMarkdown: string;
+			siteFooterMarkdown: string;
+		}> => {
 			const settings = await env.forum_db
-				.prepare(`SELECT key, value FROM settings WHERE key IN (?, ?)`)
-				.bind(SITE_NAME_SETTING_KEY, SITE_AVATAR_URL_SETTING_KEY)
+				.prepare(`SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)`)
+				.bind(SITE_NAME_SETTING_KEY, SITE_AVATAR_URL_SETTING_KEY, HOME_INTRO_MARKDOWN_SETTING_KEY, SITE_FOOTER_MARKDOWN_SETTING_KEY)
 				.all<{ key: string; value: string | null }>();
 			let siteName = DEFAULT_SITE_NAME;
 			let siteAvatarUrl = '';
+			let homeIntroMarkdown = DEFAULT_HOME_INTRO_MARKDOWN;
+			let siteFooterMarkdown = DEFAULT_SITE_FOOTER_MARKDOWN;
 			for (const row of settings.results ?? []) {
 				if (row.key === SITE_NAME_SETTING_KEY) siteName = normalizeSiteName(row.value);
 				if (row.key === SITE_AVATAR_URL_SETTING_KEY) siteAvatarUrl = normalizeSiteAvatarUrl(row.value);
+				if (row.key === HOME_INTRO_MARKDOWN_SETTING_KEY) homeIntroMarkdown = normalizeMarkdownSetting(row.value, DEFAULT_HOME_INTRO_MARKDOWN);
+				if (row.key === SITE_FOOTER_MARKDOWN_SETTING_KEY) siteFooterMarkdown = normalizeMarkdownSetting(row.value, DEFAULT_SITE_FOOTER_MARKDOWN);
 			}
-			return { siteName, siteAvatarUrl };
+			return { siteName, siteAvatarUrl, homeIntroMarkdown, siteFooterMarkdown };
 		};
 		const getPageTitle = (pathname: string, siteName: string): string => {
 			const pageTitle =
@@ -476,17 +496,19 @@ export default {
 		// GET /api/config
 		if (url.pathname === '/api/config' && method === 'GET') {
 			try {
-				const [setting, userCount, branding] = await Promise.all([
+				const [setting, userCount, siteConfig] = await Promise.all([
 					env.forum_db.prepare("SELECT value FROM settings WHERE key = 'turnstile_enabled'").first(),
 					env.forum_db.prepare('SELECT COUNT(*) as count FROM users').first('count'),
-					getSiteBranding()
+					getSiteConfig()
 				]);
 
 				return jsonResponse({
 					turnstile_enabled: setting ? setting.value === '1' : false,
 					turnstile_site_key: env.TURNSTILE_SITE_KEY || '',
-					site_name: branding.siteName,
-					site_avatar_url: branding.siteAvatarUrl,
+					site_name: siteConfig.siteName,
+					site_avatar_url: siteConfig.siteAvatarUrl,
+					home_intro_markdown: siteConfig.homeIntroMarkdown,
+					site_footer_markdown: siteConfig.siteFooterMarkdown,
 					user_count: userCount || 0
 				});
 			} catch (e) {
@@ -512,7 +534,9 @@ export default {
 					notify_on_manual_verify: false,
 					session_ttl_days: sessionTtlDays,
 					site_name: DEFAULT_SITE_NAME,
-					site_avatar_url: ''
+					site_avatar_url: '',
+					home_intro_markdown: DEFAULT_HOME_INTRO_MARKDOWN,
+					site_footer_markdown: DEFAULT_SITE_FOOTER_MARKDOWN
 				};
 
 				if (settings.results) {
@@ -524,6 +548,14 @@ export default {
 						}
 						if (row.key === SITE_AVATAR_URL_SETTING_KEY) {
 							config.site_avatar_url = normalizeSiteAvatarUrl(row.value);
+							continue;
+						}
+						if (row.key === HOME_INTRO_MARKDOWN_SETTING_KEY) {
+							config.home_intro_markdown = normalizeMarkdownSetting(row.value, DEFAULT_HOME_INTRO_MARKDOWN);
+							continue;
+						}
+						if (row.key === SITE_FOOTER_MARKDOWN_SETTING_KEY) {
+							config.site_footer_markdown = normalizeMarkdownSetting(row.value, DEFAULT_SITE_FOOTER_MARKDOWN);
 							continue;
 						}
 						if (BOOLEAN_SETTING_KEYS.has(row.key)) {
@@ -553,7 +585,9 @@ export default {
 					notify_on_manual_verify,
 					session_ttl_days,
 					site_name,
-					site_avatar_url
+					site_avatar_url,
+					home_intro_markdown,
+					site_footer_markdown
 				} = body;
 
 				const stmt = env.forum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -587,6 +621,20 @@ export default {
 						return jsonResponse({ error: '站点头像 URL 必须是 http(s) 地址或以 / 开头的站内路径' }, 400);
 					}
 					batch.push(stmt.bind(SITE_AVATAR_URL_SETTING_KEY, normalizedSiteAvatarUrl));
+				}
+				if (home_intro_markdown !== undefined) {
+					const normalizedHomeIntroMarkdown = typeof home_intro_markdown === 'string' ? home_intro_markdown : String(home_intro_markdown ?? '');
+					if (normalizedHomeIntroMarkdown.length > MAX_MARKDOWN_SETTING_LENGTH) {
+						return jsonResponse({ error: `首页说明不能超过 ${MAX_MARKDOWN_SETTING_LENGTH} 个字符` }, 400);
+					}
+					batch.push(stmt.bind(HOME_INTRO_MARKDOWN_SETTING_KEY, normalizedHomeIntroMarkdown));
+				}
+				if (site_footer_markdown !== undefined) {
+					const normalizedSiteFooterMarkdown = typeof site_footer_markdown === 'string' ? site_footer_markdown : String(site_footer_markdown ?? '');
+					if (normalizedSiteFooterMarkdown.length > MAX_MARKDOWN_SETTING_LENGTH) {
+						return jsonResponse({ error: `页脚内容不能超过 ${MAX_MARKDOWN_SETTING_LENGTH} 个字符` }, 400);
+					}
+					batch.push(stmt.bind(SITE_FOOTER_MARKDOWN_SETTING_KEY, normalizedSiteFooterMarkdown));
 				}
 
 				if (batch.length > 0) await env.forum_db.batch(batch);
@@ -2336,7 +2384,7 @@ export default {
 			const rewriteHtmlResponse = async (response: Response) => {
 				const contentType = response.headers.get('content-type') || '';
 				if (!contentType.toLowerCase().includes('text/html')) return response;
-				const { siteName, siteAvatarUrl } = await getSiteBranding();
+				const { siteName, siteAvatarUrl } = await getSiteConfig();
 				const title = getPageTitle(pathname, siteName);
 				const rewriter = new HTMLRewriter()
 					.on('title', {

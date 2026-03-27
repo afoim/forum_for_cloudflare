@@ -2,8 +2,8 @@ import * as React from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Trash2, User, X } from 'lucide-react';
 
 import MDEditor, { commands, type ICommand } from '@uiw/react-md-editor';
-import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
+import { TurnstileWidget } from '@/components/turnstile';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -376,9 +376,10 @@ export function IndexPage() {
 				<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 					<div className="min-w-0">
 						<h1 className="text-2xl font-semibold tracking-tight">{config?.site_name || 'D1 Forum'}</h1>
-						<p className="break-all text-sm text-muted-foreground">
-							开源：<a className="text-foreground underline" href="https://github.com/afoim/forum_for_cloudflare" target="_blank" rel="noopener noreferrer">https://github.com/afoim/forum_for_cloudflare</a> 基于 shadcn/ui + Tailwind 的多页应用（非 SPA），由 Cloudflare Workers 在边缘统一提供静态页面与 API。感谢 <a className="text-foreground underline" href="https://www.cloudflare.com" target="_blank" rel="noopener noreferrer">https://www.cloudflare.com</a> 提供的 CDN 与 DDoS 防护服务
-						</p>
+						<div
+							className="prose prose-sm mt-2 max-w-none break-words text-muted-foreground [&_a]:break-all [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+							dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(config?.home_intro_markdown || '') }}
+						/>
 					</div>
 					<div className="flex w-full min-w-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
 						<label className="text-sm text-muted-foreground" htmlFor="category-filter">

@@ -75,6 +75,8 @@ describe('Worker API smoke tests', () => {
 		expect(typeof data.turnstile_site_key).toBe('string');
 		expect(data.site_name).toBe('D1 Forum');
 		expect(data.site_avatar_url).toBe('');
+		expect(data.home_intro_markdown).toContain('forum_for_cloudflare');
+		expect(data.site_footer_markdown).toBe('');
 	});
 
 	it('admin settings should persist branding fields and keep string types', async () => {
@@ -93,6 +95,8 @@ describe('Worker API smoke tests', () => {
 			body: JSON.stringify({
 				site_name: 'Cloud Forum',
 				site_avatar_url: 'https://cdn.example.com/avatar.png',
+				home_intro_markdown: '# 首页说明\n\n欢迎来到论坛。',
+				site_footer_markdown: '[页脚链接](https://example.com)',
 				turnstile_enabled: true,
 				session_ttl_days: 14
 			})
@@ -115,10 +119,38 @@ describe('Worker API smoke tests', () => {
 		const data = await getResponse.json<any>();
 		expect(data.site_name).toBe('Cloud Forum');
 		expect(data.site_avatar_url).toBe('https://cdn.example.com/avatar.png');
+		expect(data.home_intro_markdown).toBe('# 首页说明\n\n欢迎来到论坛。');
+		expect(data.site_footer_markdown).toBe('[页脚链接](https://example.com)');
 		expect(typeof data.site_name).toBe('string');
 		expect(typeof data.site_avatar_url).toBe('string');
+		expect(typeof data.home_intro_markdown).toBe('string');
+		expect(typeof data.site_footer_markdown).toBe('string');
 		expect(data.turnstile_enabled).toBe(true);
 		expect(data.session_ttl_days).toBe(14);
+	});
+
+	it('admin settings should reject overly long markdown fields', async () => {
+		await resetTestData();
+		const { token } = await createAdminAuth();
+		const now = Math.floor(Date.now() / 1000).toString();
+		const nonce = crypto.randomUUID();
+		const request = new Request('http://example.com/api/admin/settings', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${token}`,
+				'X-Timestamp': now,
+				'X-Nonce': nonce
+			},
+			body: JSON.stringify({
+				home_intro_markdown: 'a'.repeat(5001)
+			})
+		});
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(request, env, ctx);
+		await waitOnExecutionContext(ctx);
+		expect(response.status).toBe(400);
+		await expect(response.json<any>()).resolves.toMatchObject({ error: '首页说明不能超过 5000 个字符' });
 	});
 
 	it('non-admin should be rejected from admin settings', async () => {

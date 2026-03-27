@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { SiteFooter } from '@/components/site-footer';
 import { TurnstileWidget } from '@/components/turnstile';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,8 +53,8 @@ export function ForgotPage() {
 	}
 
 	return (
-		<div className="min-h-dvh bg-muted/20">
-			<main className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-6 px-4 py-10">
+		<div className="flex min-h-dvh flex-col bg-muted/20">
+			<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
 				<a href="/" className="inline-flex items-center gap-3 text-foreground">
 					{siteAvatarUrl ? (
 						<img src={siteAvatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
@@ -97,6 +98,7 @@ export function ForgotPage() {
 					</CardContent>
 				</Card>
 			</main>
+			<SiteFooter markdown={config?.site_footer_markdown} />
 		</div>
 	);
 }

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import {
 	adminTestEmail,
 	apiFetch,
@@ -17,6 +18,7 @@ import {
 	type Category
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import { renderMarkdownToHtml } from '@/lib/markdown';
 
 type EmailTemplateField = {
 	key: string;
@@ -105,7 +107,9 @@ export function AdminPage() {
 		notify_on_manual_verify: false,
 		session_ttl_days: '7',
 		site_name: 'D1 Forum',
-		site_avatar_url: ''
+		site_avatar_url: '',
+		home_intro_markdown: '',
+		site_footer_markdown: ''
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -158,7 +162,9 @@ export function AdminPage() {
 				notify_on_manual_verify: !!settings.notify_on_manual_verify,
 				session_ttl_days: String(settings.session_ttl_days ?? 7),
 				site_name: settings.site_name || 'D1 Forum',
-				site_avatar_url: settings.site_avatar_url || ''
+				site_avatar_url: settings.site_avatar_url || '',
+				home_intro_markdown: settings.home_intro_markdown || '',
+				site_footer_markdown: settings.site_footer_markdown || ''
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -450,6 +456,30 @@ export function AdminPage() {
 									/>
 									<p className="text-xs text-muted-foreground">请输入 1 到 365 之间的整数天数。</p>
 								</div>
+								<div className="grid gap-2">
+									<Label htmlFor="home-intro-markdown">首页说明 Markdown</Label>
+									<Textarea
+										id="home-intro-markdown"
+										value={systemSettings.home_intro_markdown}
+										onChange={(e) => setSystemSettings((s) => ({ ...s, home_intro_markdown: e.target.value }))}
+										placeholder="支持标题、列表、链接、代码块等 Markdown"
+										maxLength={5000}
+										rows={6}
+									/>
+									<p className="text-xs text-muted-foreground">显示在首页论坛标题下方，保留 Markdown 原始换行与空白格式。</p>
+								</div>
+								<div className="grid gap-2">
+									<Label htmlFor="site-footer-markdown">全站页脚 Markdown</Label>
+									<Textarea
+										id="site-footer-markdown"
+										value={systemSettings.site_footer_markdown}
+										onChange={(e) => setSystemSettings((s) => ({ ...s, site_footer_markdown: e.target.value }))}
+										placeholder="留空则不显示页脚"
+										maxLength={5000}
+										rows={5}
+									/>
+									<p className="text-xs text-muted-foreground">用于首页、帖子页、设置页、管理页以及登录/注册/找回/重置密码页的统一页脚。</p>
+								</div>
 								{systemSettings.site_name || systemSettings.site_avatar_url ? (
 									<div className="rounded-md border bg-muted/20 p-3">
 										<div className="mb-2 text-xs text-muted-foreground">品牌预览</div>
@@ -469,6 +499,24 @@ export function AdminPage() {
 												<div className="text-xs text-muted-foreground">用于站点头部、页面标题与 favicon</div>
 											</div>
 										</div>
+									</div>
+								) : null}
+								{systemSettings.home_intro_markdown ? (
+									<div className="rounded-md border bg-muted/20 p-3">
+										<div className="mb-2 text-xs text-muted-foreground">首页说明预览</div>
+										<div
+											className="prose prose-sm max-w-none break-words [&_a]:break-all [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+											dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(systemSettings.home_intro_markdown) }}
+										/>
+									</div>
+								) : null}
+								{systemSettings.site_footer_markdown ? (
+									<div className="rounded-md border bg-muted/20 p-3">
+										<div className="mb-2 text-xs text-muted-foreground">页脚预览</div>
+										<div
+											className="prose prose-sm max-w-none break-words text-muted-foreground [&_a]:break-all [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+											dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(systemSettings.site_footer_markdown) }}
+										/>
 									</div>
 								) : null}
 								<Separator />

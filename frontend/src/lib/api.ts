@@ -5,6 +5,8 @@ export type ForumConfig = {
 	turnstile_site_key: string;
 	site_name: string;
 	site_avatar_url: string;
+	home_intro_markdown: string;
+	site_footer_markdown: string;
 	user_count?: number;
 };
 
@@ -17,6 +19,8 @@ export type AdminSettings = {
 	session_ttl_days: number;
 	site_name: string;
 	site_avatar_url: string;
+	home_intro_markdown: string;
+	site_footer_markdown: string;
 };
 
 export type SessionInfo = {

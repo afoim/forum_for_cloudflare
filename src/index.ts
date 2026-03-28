@@ -108,8 +108,8 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 		key: 'reset_password',
 		label: '密码重置邮件',
 		requiredFields: ['resetLink'],
-		defaults: (origin) => ({
-			resetLink: `${origin}/reset?token=test-reset-token`
+		defaults: (_origin) => ({
+			resetLink: 'https://2x.nz/forum/auth/reset-password/?token=test-reset-token'
 		}),
 		build: (payload) => ({
 			subject: '密码重置请求',
@@ -243,11 +243,11 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 		key: 'post_new_comment',
 		label: '帖子新评论提醒',
 		requiredFields: ['commenterName', 'postTitle', 'commentContent', 'postUrl'],
-		defaults: (origin) => ({
+		defaults: (_origin) => ({
 			commenterName: '测试评论者',
 			postTitle: '示例帖子标题',
 			commentContent: '这是一条用于测试的新评论内容。',
-			postUrl: `${origin}/post?id=1`
+			postUrl: 'https://2x.nz/forum/post/?id=1'
 		}),
 		build: (payload) => ({
 			subject: `您的帖子有新评论：${payload.postTitle}`,
@@ -264,11 +264,11 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 		key: 'comment_new_reply',
 		label: '评论新回复提醒',
 		requiredFields: ['commenterName', 'postTitle', 'replyContent', 'postUrl'],
-		defaults: (origin) => ({
+		defaults: (_origin) => ({
 			commenterName: '测试评论者',
 			postTitle: '示例帖子标题',
 			replyContent: '这是一条用于测试的新回复内容。',
-			postUrl: `${origin}/post?id=1`
+			postUrl: 'https://2x.nz/forum/post/?id=1'
 		}),
 		build: (payload) => ({
 			subject: '您的评论有新回复',
@@ -348,11 +348,26 @@ export default {
 			);
 		}
 
-		// Helper to return JSON response with CORS
+		// Helper to return responses with CORS
 		const jsonResponse = (data: any, status = 200) => {
 			return Response.json(data, {
 				status,
 				headers: corsHeaders,
+			});
+		};
+		const textResponse = (body: string, status = 200) => {
+			return new Response(body, {
+				status,
+				headers: corsHeaders,
+			});
+		};
+		const redirectResponse = (location: string, status = 302) => {
+			return new Response(null, {
+				status,
+				headers: {
+					...corsHeaders,
+					Location: location,
+				},
 			});
 		};
 
@@ -600,6 +615,18 @@ export default {
 						role: userPayload.role
 					}
 				});
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/user/avatar
+		if (url.pathname === '/api/user/avatar' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				const user = await env.forum_db.prepare('SELECT avatar_url FROM users WHERE id = ?').bind(userPayload.id).first();
+				if (!user) return jsonResponse({ error: 'User not found' }, 404);
+				return jsonResponse({ avatar_url: user.avatar_url || null });
 			} catch (e) {
 				return handleError(e);
 			}
@@ -936,7 +963,7 @@ export default {
 				if (!token) return jsonResponse({ error: 'Missing parameters' }, 400);
 
 				const user = await env.forum_db.prepare('SELECT totp_secret FROM users WHERE id = ?').bind(user_id).first();
-				
+
 				if (!user || !user.totp_secret) return jsonResponse({ error: 'TOTP not setup' }, 400);
 
 				const totp = new OTPAuth.TOTP({
@@ -955,6 +982,22 @@ export default {
 				} else {
 					return jsonResponse({ error: 'Invalid code' }, 400);
 				}
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/user/totp/status
+		if (url.pathname === '/api/user/totp/status' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				const user = await env.forum_db.prepare('SELECT totp_enabled FROM users WHERE id = ?').bind(userPayload.id).first();
+
+				if (!user) return jsonResponse({ error: 'User not found' }, 404);
+
+				return jsonResponse({
+					totp_enabled: !!user.totp_enabled,
+				});
 			} catch (e) {
 				return handleError(e);
 			}
@@ -989,7 +1032,7 @@ export default {
 				await env.forum_db.prepare('UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?')
 					.bind(token, expires, user.id).run();
 
-				const resetLink = `${url.origin}/reset?token=${token}`;
+				const resetLink = `https://2x.nz/forum/auth/reset-password/?token=${encodeURIComponent(token)}`;
 
 				ctx.waitUntil(sendEmailByTemplate(email, 'reset_password', { resetLink }).catch(console.error));
 				return jsonResponse({ success: true });
@@ -1104,18 +1147,18 @@ export default {
 		// GET /api/verify-email-change
 		if (url.pathname === '/api/verify-email-change' && method === 'GET') {
 			const token = url.searchParams.get('token');
-			if (!token) return new Response('Missing token', { status: 400 });
+			if (!token) return textResponse('Missing token', 400);
 
 			try {
 				const user = await env.forum_db.prepare('SELECT * FROM users WHERE email_change_token = ?').bind(token).first();
-				if (!user) return new Response('Invalid token', { status: 400 });
+				if (!user) return textResponse('Invalid token', 400);
 
 				await env.forum_db.prepare('UPDATE users SET email = ?, pending_email = NULL, email_change_token = NULL WHERE id = ?')
 					.bind(user.pending_email, user.id).run();
 
-				return Response.redirect(`${url.origin}/?email_changed=true`, 302);
+				return redirectResponse(`${url.origin}/?email_changed=true`);
 			} catch (e) {
-				return new Response('Failed', { status: 500 });
+				return textResponse('Failed', 500);
 			}
 		}
 
@@ -1738,7 +1781,7 @@ export default {
 		if (url.pathname === '/api/verify' && method === 'GET') {
 			const token = url.searchParams.get('token');
 			if (!token) {
-				return new Response('缺少 token', { status: 400 });
+				return textResponse('缺少 token', 400);
 			}
 
 			try {
@@ -1748,12 +1791,12 @@ export default {
 
 				if (success) {
 					// Redirect to home page with verified param
-					return Response.redirect(`${url.origin}/?verified=true`, 302);
+					return redirectResponse(`${url.origin}/?verified=true`);
 				} else {
-					return new Response('token 无效或已过期', { status: 400 });
+					return textResponse('token 无效或已过期', 400);
 				}
 			} catch (e) {
-				return new Response('验证失败', { status: 500 });
+				return textResponse('验证失败', 500);
 			}
 		}
 
@@ -2102,7 +2145,7 @@ export default {
 					// Fetch commenter name
 					const commenter = await env.forum_db.prepare('SELECT username FROM users WHERE id = ?').bind(userPayload.id).first();
 					const commenterName = commenter.username;
-					const postUrl = `${url.origin}/post?id=${postId}`;
+					const postUrl = `https://2x.nz/forum/post/?id=${postId}`;
 
 					// Notify Post Author (if not self)
 					if (post && post.author_id !== userPayload.id && post.email_notifications === 1) {
@@ -2298,65 +2341,25 @@ export default {
 					if (!category) return jsonResponse({ error: 'Category not found' }, 400);
 				}
 
-				const { success } = await env.forum_db.prepare(
+				const { success, meta } = await env.forum_db.prepare(
 					'INSERT INTO posts (author_id, title, content, category_id) VALUES (?, ?, ?, ?)'
 				).bind(userPayload.id, safeTitle.trim(), content.trim(), category_id || null).run();
-				
-				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', 'new', { title_length: safeTitle.length }, request);
+				const postId = Number(meta?.last_row_id || 0) || null;
 
-				return jsonResponse({ success }, 201);
+				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', String(postId || 'new'), { title_length: safeTitle.length }, request);
+
+				return jsonResponse({ success, id: postId }, 201);
 			} catch (e) {
 				return handleError(e);
 			}
 		}
 
 		if (method === 'GET' && !url.pathname.startsWith('/api')) {
-			const pathname = url.pathname;
-
-			if (!(env as any).ASSETS?.fetch) return new Response('Not Found', { status: 404 });
-			const mapped =
-				pathname === '/login' ? '/login.html' :
-				pathname === '/register' ? '/register.html' :
-				pathname === '/forgot' ? '/forgot.html' :
-				pathname === '/reset' ? '/reset.html' :
-				pathname === '/settings' ? '/settings.html' :
-				pathname === '/admin' ? '/admin.html' :
-				pathname === '/post' ? '/post.html' :
-				pathname;
-
-			const rewriteHtmlResponse = async (response: Response) => {
-				const contentType = response.headers.get('content-type') || '';
-				if (!contentType.toLowerCase().includes('text/html')) return response;
-				const { siteName, siteAvatarUrl } = await getSiteConfig();
-				const title = getPageTitle(pathname, siteName);
-				const rewriter = new HTMLRewriter()
-					.on('title', {
-						element(element) {
-							element.setInnerContent(title);
-						}
-					})
-					.on('link[rel="icon"]', {
-						element(element) {
-							if (siteAvatarUrl) {
-								element.setAttribute('href', siteAvatarUrl);
-							} else {
-								element.removeAttribute('href');
-							}
-						}
-					});
-				return rewriter.transform(response);
-			};
-			const assetUrl = new URL(request.url);
-			assetUrl.pathname = mapped;
-			const assetRes = await env.ASSETS.fetch(new Request(assetUrl, request));
-			if (assetRes.status !== 404) return rewriteHtmlResponse(assetRes);
-			if (mapped !== pathname) {
-				const directRes = await env.ASSETS.fetch(request);
-				if (directRes.status !== 404) return rewriteHtmlResponse(directRes);
-			}
-			return new Response('Not Found', { status: 404 });
+			const redirectUrl = new URL(`https://2x.nz/forum${url.pathname}`);
+			redirectUrl.search = url.search;
+			return redirectResponse(redirectUrl.toString(), 302);
 		}
 
-		return new Response('Not Found', { status: 404 });
+		return textResponse('Not Found', 404);
 	},
 } satisfies ExportedHandler<Env>;

@@ -1,7 +1,7 @@
 
 import { connect } from 'cloudflare:sockets';
 
-const DEFAULT_FROM_NAME = '论坛管理员';
+const DEFAULT_FROM_NAME = 'AcoFork Forum';
 
 const SMTP_CONFIG = {
     hostname: 'smtp.exmail.qq.com',

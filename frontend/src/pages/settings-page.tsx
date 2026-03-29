@@ -29,6 +29,9 @@ export function SettingsPage() {
 	const [totpCode, setTotpCode] = React.useState('');
 	const qrCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
+	const [disablePassword, setDisablePassword] = React.useState('');
+	const [disableTotp, setDisableTotp] = React.useState('');
+
 	const [deletePassword, setDeletePassword] = React.useState('');
 	const [deleteTotp, setDeleteTotp] = React.useState('');
 
@@ -167,6 +170,33 @@ export function SettingsPage() {
 		}
 	}
 
+	async function disableTotpAction() {
+		if (!user) return;
+		setError('');
+		if (!confirm('确定要关闭 2FA 吗？关闭后，登录和敏感操作将不再需要双重验证码。')) return;
+		setLoading(true);
+		try {
+			await apiFetch('/user/totp/disable', {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ password: disablePassword, totp_code: disableTotp })
+			});
+			const updated = { ...user, totp_enabled: false };
+			setUser(updated);
+			setUserState(updated);
+			setDisablePassword('');
+			setDisableTotp('');
+			setTotpSecret('');
+			setTotpUri('');
+			setTotpCode('');
+			alert('2FA 已关闭');
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
 	async function deleteAccount() {
 		if (!user) return;
 		setError('');
@@ -290,7 +320,40 @@ export function SettingsPage() {
 					</CardHeader>
 					<CardContent className="space-y-4">
 						{user?.totp_enabled ? (
-							<div className="rounded-md border bg-muted/30 p-3 text-sm">✅ 2FA 已启用</div>
+							<div className="space-y-4">
+								<div className="rounded-md border bg-muted/30 p-3 text-sm">✅ 2FA 已启用</div>
+								<div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4">
+									<div className="text-sm font-medium">关闭 2FA</div>
+									<div className="mt-1 text-sm text-muted-foreground">关闭后，登录和敏感操作将不再需要双重验证码。</div>
+									<div className="mt-4 grid gap-4 sm:grid-cols-2">
+										<div className="space-y-2">
+											<Label htmlFor="disable-totp-password">当前密码</Label>
+											<Input
+												id="disable-totp-password"
+												type="password"
+												autoComplete="current-password"
+												value={disablePassword}
+												onChange={(e) => setDisablePassword(e.target.value)}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="disable-totp-code">当前 2FA 验证码</Label>
+											<Input
+												id="disable-totp-code"
+												type="text"
+												inputMode="numeric"
+												maxLength={6}
+												autoComplete="one-time-code"
+												value={disableTotp}
+												onChange={(e) => setDisableTotp(e.target.value)}
+											/>
+										</div>
+									</div>
+									<Button className="mt-4" variant="outline" onClick={disableTotpAction} disabled={loading}>
+										{loading ? '处理中...' : '关闭 2FA'}
+									</Button>
+								</div>
+							</div>
 						) : (
 							<>
 								<div className="text-sm text-muted-foreground">启用 2FA 以保护您的账户。</div>

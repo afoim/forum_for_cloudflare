@@ -1007,6 +1007,43 @@ export default {
 			}
 		}
 
+		// POST /api/user/totp/disable
+		if (url.pathname === '/api/user/totp/disable' && method === 'POST') {
+			try {
+				const userPayload = await authenticate(request);
+				const body = await request.json() as any;
+				const { password, totp_code } = body;
+				const user_id = userPayload.id;
+
+				if (!password || !totp_code) return jsonResponse({ error: 'Missing parameters' }, 400);
+
+				const user = await env.forum_db.prepare('SELECT * FROM users WHERE id = ?').bind(user_id).first();
+				if (!user) return jsonResponse({ error: 'User not found' }, 404);
+				if (!user.totp_enabled || !user.totp_secret) return jsonResponse({ error: 'TOTP not enabled' }, 400);
+
+				const passwordHash = await hashPassword(password);
+				if (user.password !== passwordHash) {
+					return jsonResponse({ error: 'Invalid password' }, 401);
+				}
+
+				const totp = new OTPAuth.TOTP({
+					algorithm: 'SHA1',
+					digits: 6,
+					period: 30,
+					secret: OTPAuth.Secret.fromBase32(user.totp_secret)
+				});
+				if (totp.validate({ token: totp_code, window: 1 }) === null) {
+					return jsonResponse({ error: 'Invalid TOTP code' }, 401);
+				}
+
+				await env.forum_db.prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?').bind(user_id).run();
+				await security.logAudit(userPayload.id, 'DISABLE_TOTP', 'user', String(user_id), { method: 'password+totp' }, request);
+				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
 		// GET /api/user/totp/status
 		if (url.pathname === '/api/user/totp/status' && method === 'GET') {
 			try {

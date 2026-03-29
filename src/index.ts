@@ -70,6 +70,32 @@ function hasRestrictedKeywords(username: string): boolean {
 	return restricted.some(keyword => username.toLowerCase().includes(keyword.toLowerCase()));
 }
 
+function normalizeOptionalProfileText(value: unknown, maxLength: number, fieldName: string): string | null {
+	if (value === undefined || value === null) return null;
+	if (typeof value !== 'string') throw new Error(`${fieldName} must be a string`);
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	if (trimmed.length > maxLength) throw new Error(`${fieldName} too long (Max ${maxLength} chars)`);
+	if (hasInvisibleCharacters(trimmed)) throw new Error(`${fieldName} contains invalid invisible characters`);
+	if (hasControlCharacters(trimmed)) throw new Error(`${fieldName} contains invalid control characters`);
+	return trimmed;
+}
+
+function normalizeProfileGender(value: unknown): string | null {
+	const normalized = normalizeOptionalProfileText(value, 20, 'Gender');
+	if (normalized === null) return null;
+	const allowedValues = ['male', 'female', 'other', 'prefer_not_to_say'];
+	if (!allowedValues.includes(normalized)) throw new Error('Invalid gender');
+	return normalized;
+}
+
+function normalizeProfileAge(value: unknown): number | null {
+	if (value === undefined || value === null || value === '') return null;
+	if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error('Age must be an integer');
+	if (value <= 0 || value > 150) throw new Error('Age must be between 1 and 150');
+	return value;
+}
+
 type EmailTemplatePayload = Record<string, string>;
 
 type EmailTemplateDefinition = {
@@ -624,7 +650,17 @@ export default {
 		if (url.pathname === '/api/user/me' && method === 'GET') {
 			try {
 				const userPayload = await authenticate(request);
-				const user = await env.forum_db.prepare('SELECT * FROM users WHERE id = ?').bind(userPayload.id).first();
+				const user = await env.forum_db.prepare(
+					`SELECT
+						users.*,
+						user_profiles.gender,
+						user_profiles.bio,
+						user_profiles.age,
+						user_profiles.region
+					 FROM users
+					 LEFT JOIN user_profiles ON user_profiles.user_id = users.id
+					 WHERE users.id = ?`
+				).bind(userPayload.id).first();
 				if (!user) return jsonResponse({ error: 'User not found' }, 404);
 				return jsonResponse({
 					id: user.id,
@@ -633,7 +669,62 @@ export default {
 					avatar_url: user.avatar_url,
 					role: user.role || 'user',
 					totp_enabled: !!user.totp_enabled,
-					email_notifications: user.email_notifications === 1
+					email_notifications: user.email_notifications === 1,
+					gender: user.gender ?? null,
+					bio: user.bio ?? null,
+					age: user.age ?? null,
+					region: user.region ?? null
+				});
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/user/me/posts
+		if (url.pathname === '/api/user/me/posts' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				const limit = parseInt(url.searchParams.get('limit') || '20');
+				const offset = parseInt(url.searchParams.get('offset') || '0');
+				const sortByRaw = (url.searchParams.get('sort_by') || 'time').trim().toLowerCase();
+				const sortDirRaw = (url.searchParams.get('sort_dir') || 'desc').trim().toLowerCase();
+				const sortDir = sortDirRaw === 'asc' ? 'ASC' : 'DESC';
+
+				let query = `SELECT
+						posts.*,
+						users.username as author_name,
+						users.avatar_url as author_avatar,
+						users.role as author_role,
+						categories.name as category_name,
+						(SELECT COUNT(*) FROM likes WHERE likes.post_id = posts.id) as like_count,
+						(SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) as comment_count
+					 FROM posts
+					 JOIN users ON posts.author_id = users.id
+					 LEFT JOIN categories ON posts.category_id = categories.id
+					 WHERE posts.author_id = ?`;
+				const countQuery = 'SELECT COUNT(*) as total FROM posts WHERE author_id = ?';
+				const params: any[] = [userPayload.id];
+
+				const sortExpr =
+					sortByRaw === 'likes'
+						? `like_count ${sortDir}`
+						: sortByRaw === 'comments'
+							? `comment_count ${sortDir}`
+							: sortByRaw === 'views'
+								? `posts.view_count ${sortDir}`
+								: `posts.created_at ${sortDir}`;
+
+				query += ` ORDER BY posts.is_pinned DESC, ${sortExpr}, posts.created_at DESC LIMIT ? OFFSET ?`;
+				params.push(limit, offset);
+
+				const [postsResult, countResult] = await Promise.all([
+					env.forum_db.prepare(query).bind(...params).all(),
+					env.forum_db.prepare(countQuery).bind(userPayload.id).first()
+				]);
+
+				return jsonResponse({
+					posts: postsResult.results,
+					total: countResult ? countResult.total : 0
 				});
 			} catch (e) {
 				return handleError(e);
@@ -790,7 +881,7 @@ export default {
 				const userPayload = await authenticate(request);
 				const body = await request.json() as any;
 				const { username, avatar_url, email_notifications } = body;
-				
+
 				const user_id = userPayload.id;
 
 				if (username) {
@@ -799,7 +890,7 @@ export default {
 					if (hasInvisibleCharacters(username)) return jsonResponse({ error: 'Username contains invalid invisible characters' }, 400);
 					if (hasControlCharacters(username)) return jsonResponse({ error: 'Username contains invalid control characters' }, 400);
 					if (hasRestrictedKeywords(username)) return jsonResponse({ error: 'Username contains restricted keywords' }, 400);
-					
+
 					// Check Uniqueness
 					const existingUser = await env.forum_db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').bind(username, user_id).first();
 					if (existingUser) {
@@ -836,8 +927,18 @@ export default {
 				await env.forum_db.prepare('UPDATE users SET username = ?, avatar_url = ?, email_notifications = ? WHERE id = ?')
 					.bind(newUsername, newAvatarUrl, newEmailNotif, user_id).run();
 
-				const user = await env.forum_db.prepare('SELECT * FROM users WHERE id = ?').bind(user_id).first();
-				
+				const user = await env.forum_db.prepare(
+					`SELECT
+						users.*,
+						user_profiles.gender,
+						user_profiles.bio,
+						user_profiles.age,
+						user_profiles.region
+					 FROM users
+					 LEFT JOIN user_profiles ON user_profiles.user_id = users.id
+					 WHERE users.id = ?`
+				).bind(user_id).first();
+
 				await security.logAudit(userPayload.id, 'UPDATE_PROFILE', 'user', String(user_id), { username: newUsername }, request);
 
 				return jsonResponse({
@@ -849,10 +950,88 @@ export default {
 						avatar_url: user.avatar_url,
 						role: user.role || 'user',
 						totp_enabled: !!user.totp_enabled,
-						email_notifications: user.email_notifications === 1
+						email_notifications: user.email_notifications === 1,
+						gender: user.gender ?? null,
+						bio: user.bio ?? null,
+						age: user.age ?? null,
+						region: user.region ?? null
 					}
 				});
 			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/user/me/profile
+		if (url.pathname === '/api/user/me/profile' && method === 'POST') {
+			try {
+				const userPayload = await authenticate(request);
+				const body = await request.json() as any;
+				const gender = normalizeProfileGender(body.gender);
+				const bio = normalizeOptionalProfileText(body.bio, 500, 'Bio');
+				const age = normalizeProfileAge(body.age);
+				const region = normalizeOptionalProfileText(body.region, 100, 'Region');
+
+				const user = await env.forum_db.prepare('SELECT id FROM users WHERE id = ?').bind(userPayload.id).first();
+				if (!user) return jsonResponse({ error: 'User not found' }, 404);
+
+				const existingProfile = await env.forum_db.prepare('SELECT user_id FROM user_profiles WHERE user_id = ?').bind(userPayload.id).first();
+				if (existingProfile) {
+					await env.forum_db.prepare(
+						'UPDATE user_profiles SET gender = ?, bio = ?, age = ?, region = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+					).bind(gender, bio, age, region, userPayload.id).run();
+				} else {
+					await env.forum_db.prepare(
+						'INSERT INTO user_profiles (user_id, gender, bio, age, region) VALUES (?, ?, ?, ?, ?)'
+					).bind(userPayload.id, gender, bio, age, region).run();
+				}
+
+				const profile = await env.forum_db.prepare(
+					'SELECT user_id, gender, bio, age, region, created_at, updated_at FROM user_profiles WHERE user_id = ?'
+				).bind(userPayload.id).first();
+
+				await security.logAudit(userPayload.id, 'UPDATE_USER_PROFILE_EXT', 'user', String(userPayload.id), {
+					gender,
+					bio,
+					age,
+					region
+				}, request);
+
+				return jsonResponse({
+					success: true,
+					profile: {
+						user_id: profile?.user_id,
+						gender: profile?.gender ?? null,
+						bio: profile?.bio ?? null,
+						age: profile?.age ?? null,
+						region: profile?.region ?? null,
+						created_at: profile?.created_at,
+						updated_at: profile?.updated_at
+					}
+				});
+			} catch (e) {
+				if (e instanceof Error) {
+					const validationErrors = [
+						'Gender must be a string',
+						'Gender too long (Max 20 chars)',
+						'Gender contains invalid invisible characters',
+						'Gender contains invalid control characters',
+						'Invalid gender',
+						'Bio must be a string',
+						'Bio too long (Max 500 chars)',
+						'Bio contains invalid invisible characters',
+						'Bio contains invalid control characters',
+						'Region must be a string',
+						'Region too long (Max 100 chars)',
+						'Region contains invalid invisible characters',
+						'Region contains invalid control characters',
+						'Age must be an integer',
+						'Age must be between 1 and 150'
+					];
+					if (validationErrors.includes(e.message)) {
+						return jsonResponse({ error: e.message }, 400);
+					}
+				}
 				return handleError(e);
 			}
 		}
@@ -928,6 +1107,7 @@ export default {
 
 				// 5. Delete sessions, posts and user
 				await env.forum_db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user_id).run();
+				await env.forum_db.prepare('DELETE FROM user_profiles WHERE user_id = ?').bind(user_id).run();
 				await env.forum_db.prepare('DELETE FROM posts WHERE author_id = ?').bind(user_id).run();
 				await env.forum_db.prepare('DELETE FROM users WHERE id = ?').bind(user_id).run();
 				
@@ -1484,6 +1664,7 @@ export default {
 
 				// 4. Delete sessions and the user's posts
 				await env.forum_db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
+				await env.forum_db.prepare('DELETE FROM user_profiles WHERE user_id = ?').bind(id).run();
 				await env.forum_db.prepare('DELETE FROM posts WHERE author_id = ?').bind(id).run();
 
 				// 5. Finally, delete the user

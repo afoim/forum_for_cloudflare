@@ -2746,10 +2746,8 @@ export default {
 			}
 		}
 
-		if (method === 'GET' && !url.pathname.startsWith('/api')) {
-			const redirectUrl = new URL(`https://2x.nz/forum${url.pathname}`);
-			redirectUrl.search = url.search;
-			return redirectResponse(redirectUrl.toString(), 302);
+		if (!url.pathname.startsWith('/api')) {
+			return textResponse('Not Found', 404);
 		}
 
 		return textResponse('Not Found', 404);

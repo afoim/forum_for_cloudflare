@@ -3,7 +3,7 @@
 > [!CAUTION]
 > 本项目完全使用AI开发，作者完全不懂网络安全，也不懂后端开发，项目源码可能包含非常多的恶性漏洞，包括但不限于越权访问，信息伪造，XSS攻击，CSRF攻击等情况。若您原封不动直接部署，请确保该项目不作为生产环境使用，并且时刻做好自己的数据一夜清空的准备。
 
-一个基于 Cloudflare Workers + D1 数据库的轻量级论坛系统。
+一个基于 Cloudflare Workers + D1 数据库的论坛后端 API 项目。
 
 ## 功能特性
 
@@ -17,18 +17,17 @@
 - Markdown 支持
 - 2FA (TOTP) 双因素认证
 - Cloudflare Turnstile 人机验证
-- 深色/浅色主题
-- 管理员后台
+- 管理员后台相关 API
 
 ## 技术栈
 
-- **后端**: Cloudflare Workers (TypeScript)
+- **运行时**: Cloudflare Workers (TypeScript)
 - **数据库**: Cloudflare D1 (SQLite)
-- **前端**: React 19 + Tailwind CSS + Vite
 - **存储**: S3 兼容对象存储 (如 Cloudflare R2)
 - **认证**: JWT + 会话令牌
+- **测试**: Vitest + `@cloudflare/vitest-pool-workers`
 
-## 部署步骤
+## 开发与部署
 
 ### 1. 前置要求
 
@@ -104,31 +103,35 @@ SMTP_FROM=noreply@example.com
 npm run dev
 ```
 
+默认仅启动 Worker 本地开发服务，不再包含任何前端静态页面构建或托管。
+
 ### 8. 部署到 Cloudflare
 
 ```bash
 npm run deploy
 ```
 
+当前仓库仅负责 `/api/*` 后端能力；非 `/api/*` 路由应由上层网关、反向代理或其他站点配置接管。
+
 ## 配置 Cloudflare Turnstile
 
 1. 访问 [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) 获取 Site Key 和 Secret Key
 2. 将 Site Key 设置为环境变量 `TURNSTILE_SITE_KEY`
 3. 将 Secret Key 设置为环境变量 `TURNSTILE_SECRET_KEY`
-4. 在管理后台设置中启用 Turnstile
+4. 通过对应管理 API 启用或调整相关配置
 
 ## 目录结构
 
 ```
-├── public/             # 静态文件 (编译后的前端)
 ├── src/
-│   ├── index.ts        # Worker 入口
+│   ├── index.ts        # Worker API 入口
 │   ├── security.ts     # 认证/安全模块
 │   ├── s3.ts           # S3 存储模块
 │   ├── smtp.ts         # 邮件发送模块
 │   └── identicon.ts    # 默认头像生成
 ├── migrations/         # 数据库迁移文件
 ├── schema.sql          # 数据库初始化脚本
+├── test/               # 后端测试
 ├── wrangler.jsonc      # Cloudflare Workers 配置
 └── package.json
 ```

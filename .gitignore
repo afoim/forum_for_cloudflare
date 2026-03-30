@@ -169,5 +169,3 @@ dist
 .env*
 !.env.example
 .wrangler/
-
-/public

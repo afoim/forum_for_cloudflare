@@ -10,20 +10,9 @@
 	"compatibility_flags": [
 		"global_fetch_strictly_public"
 	],
-	"assets": {
-		// The path to the directory containing the `index.html` file to be served at `/`
-		"directory": "./public"
-	},
 	"observability": {
 		"enabled": true
 	},
-	"rules": [
-		{
-			"type": "Text",
-			"globs": ["**/*.html"],
-			"fallthrough": true
-		}
-	],
 	"d1_databases": [
 		{
 			"binding": "forum_db",

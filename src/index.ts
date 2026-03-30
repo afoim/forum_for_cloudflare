@@ -266,6 +266,26 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 		})
 	},
 	{
+		key: 'admin_post_deleted',
+		label: '后台删帖通知',
+		requiredFields: ['username', 'postTitle', 'postUrl'],
+		defaults: (_origin) => ({
+			username: '测试用户',
+			postTitle: '示例帖子标题',
+			postUrl: 'https://2x.nz/forum/post/?id=1'
+		}),
+		build: (payload) => ({
+			subject: `您的帖子已被管理员删除：${payload.postTitle}`,
+			html: `
+					<h1>帖子已删除</h1>
+					<p>${escapeHtml(payload.username)}，您好。</p>
+					<p>您发布的帖子“<strong>${escapeHtml(payload.postTitle)}</strong>”已被管理员删除。</p>
+					<p>如需了解详情，请联系管理员。</p>
+					<p><a href="${payload.postUrl}">帖子原链接</a></p>
+				`
+		})
+	},
+	{
 		key: 'post_new_comment',
 		label: '帖子新评论提醒',
 		requiredFields: ['commenterName', 'postTitle', 'commentContent', 'postUrl'],
@@ -409,6 +429,7 @@ export default {
 		const BOOLEAN_SETTING_KEYS = new Set([
 			'turnstile_enabled',
 			'notify_on_user_delete',
+			'notify_on_post_delete',
 			'notify_on_username_change',
 			'notify_on_avatar_change',
 			'notify_on_manual_verify'
@@ -542,6 +563,7 @@ export default {
 				const config: Record<string, unknown> = {
 					turnstile_enabled: false,
 					notify_on_user_delete: false,
+					notify_on_post_delete: false,
 					notify_on_username_change: false,
 					notify_on_avatar_change: false,
 					notify_on_manual_verify: false,
@@ -583,6 +605,7 @@ export default {
 				const {
 					turnstile_enabled,
 					notify_on_user_delete,
+					notify_on_post_delete,
 					notify_on_username_change,
 					notify_on_avatar_change,
 					notify_on_manual_verify,
@@ -596,6 +619,7 @@ export default {
 
 				if (turnstile_enabled !== undefined) batch.push(stmt.bind('turnstile_enabled', turnstile_enabled ? '1' : '0'));
 				if (notify_on_user_delete !== undefined) batch.push(stmt.bind('notify_on_user_delete', notify_on_user_delete ? '1' : '0'));
+				if (notify_on_post_delete !== undefined) batch.push(stmt.bind('notify_on_post_delete', notify_on_post_delete ? '1' : '0'));
 				if (notify_on_username_change !== undefined) batch.push(stmt.bind('notify_on_username_change', notify_on_username_change ? '1' : '0'));
 				if (notify_on_avatar_change !== undefined) batch.push(stmt.bind('notify_on_avatar_change', notify_on_avatar_change ? '1' : '0'));
 				if (notify_on_manual_verify !== undefined) batch.push(stmt.bind('notify_on_manual_verify', notify_on_manual_verify ? '1' : '0'));
@@ -913,7 +937,7 @@ export default {
 						// Generate Identicon
 						newAvatarUrl = await generateIdenticon(String(user_id));
 					} else {
-						if (avatar_url.length > 1000) return jsonResponse({ error: 'Avatar URL too long (Max 1000 chars)' }, 400);
+						if (avatar_url.length > 5000) return jsonResponse({ error: 'Avatar URL too long (Max 5000 chars)' }, 400);
 						if (!/^https?:\/\//i.test(avatar_url) && !avatar_url.startsWith('data:image/svg+xml')) return jsonResponse({ error: 'Invalid Avatar URL (Must start with http:// or https://)' }, 400);
 						newAvatarUrl = avatar_url;
 					}
@@ -1426,7 +1450,7 @@ export default {
 						const identicon = await generateIdenticon(String(id));
 						await env.forum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(identicon, id).run();
 					} else {
-						if (avatar_url.length > 1000) return jsonResponse({ error: 'Avatar URL too long (Max 1000 chars)' }, 400);
+						if (avatar_url.length > 5000) return jsonResponse({ error: 'Avatar URL too long (Max 5000 chars)' }, 400);
 						if (!/^https?:\/\//i.test(avatar_url) && !avatar_url.startsWith('data:image/svg+xml')) return jsonResponse({ error: 'Invalid Avatar URL' }, 400);
 						await env.forum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(avatar_url, id).run();
 					}
@@ -1560,7 +1584,24 @@ export default {
 				const userPayload = await authenticate(request);
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
-				const { results } = await env.forum_db.prepare('SELECT id, email, username, role, verified, created_at, avatar_url FROM users ORDER BY created_at DESC').all();
+				const q = (url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
+				let query = 'SELECT id, email, username, role, verified, created_at, avatar_url FROM users';
+				const params: any[] = [];
+				const conditions: string[] = [];
+
+				if (q) {
+					conditions.push('(username LIKE ? OR email LIKE ?)');
+					const like = `%${q}%`;
+					params.push(like, like);
+				}
+
+				if (conditions.length) {
+					query += ` WHERE ${conditions.join(' AND ')}`;
+				}
+
+				query += ' ORDER BY created_at DESC';
+
+				const { results } = await env.forum_db.prepare(query).bind(...params).all();
 				return jsonResponse(results);
 			} catch (e) {
 				return handleError(e);
@@ -1694,21 +1735,33 @@ export default {
 				const userPayload = await authenticate(request);
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
-				// Delete images in post
-				const post = await env.forum_db.prepare('SELECT content, author_id FROM posts WHERE id = ?').bind(id).first();
-				if (post) {
-					const imageUrls = extractImageUrls(post.content as string);
-					if (imageUrls.length > 0) {
-						ctx.waitUntil(Promise.all(imageUrls.map(url => deleteImage(env as unknown as S3Env, url, post.author_id as number))).catch(err => console.error('Failed to delete post images', err)));
-					}
+				const post = await env.forum_db.prepare(
+					'SELECT posts.title, posts.content, posts.author_id, users.email, users.username FROM posts JOIN users ON posts.author_id = users.id WHERE posts.id = ?'
+				).bind(id).first();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+
+				const imageUrls = extractImageUrls(post.content as string);
+				if (imageUrls.length > 0) {
+					ctx.waitUntil(Promise.all(imageUrls.map(url => deleteImage(env as unknown as S3Env, url, post.author_id as number))).catch(err => console.error('Failed to delete post images', err)));
 				}
 
 				await env.forum_db.prepare('DELETE FROM likes WHERE post_id = ?').bind(id).run();
 				await env.forum_db.prepare('DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)').bind(id).run();
 				await env.forum_db.prepare('DELETE FROM comments WHERE post_id = ?').bind(id).run();
 				await env.forum_db.prepare('DELETE FROM posts WHERE id = ?').bind(id).run();
-				
+
 				await security.logAudit(userPayload.id, 'ADMIN_DELETE_POST', 'post', id, {}, request);
+
+				const setting = await env.forum_db.prepare("SELECT value FROM settings WHERE key = 'notify_on_post_delete'").first();
+				if (setting && setting.value === '1') {
+					const postUrl = `https://2x.nz/forum/post/?id=${id}`;
+					ctx.waitUntil(sendEmailByTemplate(post.email as string, 'admin_post_deleted', {
+						username: post.username,
+						postTitle: post.title,
+						postUrl
+					}).catch(console.error));
+				}
+
 				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);

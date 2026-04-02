@@ -4,6 +4,7 @@ import { generateIdenticon } from './identicon';
 import { uploadImage, deleteImage, listAllKeys, getPublicUrl, S3Env } from './s3';
 import * as OTPAuth from 'otpauth';
 import { Security, UserPayload } from './security';
+export { ForumWebSocket } from './durable-websocket';
 
 // Utility to extract image URLs from Markdown content
 function extractImageUrls(content: string): string[] {
@@ -382,6 +383,23 @@ export default {
 			return new Response(null, {
 				headers: corsHeaders,
 			});
+		}
+
+		// WebSocket upgrade endpoint - 使用 Durable Object
+		if (url.pathname === '/api/ws') {
+			const postId = url.searchParams.get('postId') || 'global';
+			const id = env.WS_MANAGER.idFromName(postId);
+			const stub = env.WS_MANAGER.get(id);
+			return stub.fetch(request);
+		}
+
+		// WebSocket status endpoint (for debugging)
+		if (url.pathname === '/api/ws/status' && method === 'GET') {
+			const id = env.WS_MANAGER.idFromName('global');
+			const stub = env.WS_MANAGER.get(id);
+			const resp = await stub.fetch(new Request('http://internal/status'));
+			const data = await resp.json();
+			return Response.json(data, { headers: corsHeaders });
 		}
 
 		let security: Security;
@@ -2373,6 +2391,26 @@ export default {
 				
 				await security.logAudit(userPayload.id, 'UPDATE_POST', 'post', postId, { title_length: title.length }, request);
 
+				// WebSocket broadcast for real-time updates via Durable Object
+				const wsId = env.WS_MANAGER.idFromName(String(postId));
+				const wsStub = env.WS_MANAGER.get(wsId);
+				ctx.waitUntil(wsStub.fetch(new Request('http://internal/broadcast', {
+					method: 'POST',
+					body: JSON.stringify({
+						postId: String(postId),
+						message: {
+							type: 'post_updated',
+							payload: {
+								postId: postId,
+								title: title.trim(),
+								content: content.trim(),
+								category_id: category_id || null,
+								updated_at: new Date().toISOString()
+							}
+						}
+					})
+				})).catch(console.error));
+
 				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);
@@ -2577,6 +2615,29 @@ export default {
 							}
 						}
 					}
+
+					// WebSocket broadcast for real-time updates via Durable Object
+					const wsId = env.WS_MANAGER.idFromName(String(postId));
+					const wsStub = env.WS_MANAGER.get(wsId);
+					ctx.waitUntil(wsStub.fetch(new Request('http://internal/broadcast', {
+						method: 'POST',
+						body: JSON.stringify({
+							postId: String(postId),
+							message: {
+								type: 'new_comment',
+								payload: {
+									postId: postId,
+									comment: {
+										content: content,
+										author_name: commenterName,
+										author_id: userPayload.id,
+										parent_id: parent_id || null,
+										created_at: new Date().toISOString()
+									}
+								}
+							}
+						})
+					})).catch(console.error));
 				}
 
 				return jsonResponse({ success }, 201);

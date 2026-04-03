@@ -1770,14 +1770,17 @@ export default {
 
 				await security.logAudit(userPayload.id, 'ADMIN_DELETE_POST', 'post', id, {}, request);
 
-				const setting = await env.forum_db.prepare("SELECT value FROM settings WHERE key = 'notify_on_post_delete'").first();
-				if (setting && setting.value === '1') {
-					const postUrl = `https://2x.nz/forum/post/?id=${id}`;
-					ctx.waitUntil(sendEmailByTemplate(post.email as string, 'admin_post_deleted', {
-						username: post.username,
-						postTitle: post.title,
-						postUrl
-					}).catch(console.error));
+				// 只有删除别人的帖子时才发送通知
+				if (post.author_id !== userPayload.id) {
+					const setting = await env.forum_db.prepare("SELECT value FROM settings WHERE key = 'notify_on_post_delete'").first();
+					if (setting && setting.value === '1') {
+						const postUrl = `https://2x.nz/forum/post/?id=${id}`;
+						ctx.waitUntil(sendEmailByTemplate(post.email as string, 'admin_post_deleted', {
+							username: post.username,
+							postTitle: post.title,
+							postUrl
+						}).catch(console.error));
+					}
 				}
 
 				return jsonResponse({ success: true });

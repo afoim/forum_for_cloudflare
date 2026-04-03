@@ -10,6 +10,8 @@ declare namespace Cloudflare {
         SMTP_PASS?: string;
 		TURNSTILE_SITE_KEY?: string;
 		TURNSTILE_SECRET_KEY?: string;
+		GITHUB_WEBHOOK_SECRET?: string;
+		ARTICLE_NOTIFICATION_DELAY?: string;
 		WS_MANAGER: DurableObjectNamespace;
 	}
 }

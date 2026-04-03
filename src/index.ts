@@ -307,7 +307,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 				`
 		})
 	},
-	{
+{
 		key: 'comment_new_reply',
 		label: '评论新回复提醒',
 		requiredFields: ['commenterName', 'postTitle', 'replyContent', 'postUrl'],
@@ -321,10 +321,29 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 			subject: '您的评论有新回复',
 			html: `
 					<h1>您的评论有新回复</h1>
-					<p><strong>${escapeHtml(payload.commenterName)}</strong> 回复了您在“<strong>${escapeHtml(payload.postTitle)}</strong>”下的评论：</p>
+					<p><strong>${escapeHtml(payload.commenterName)}</strong> 回复了您在"<strong>${escapeHtml(payload.postTitle)}</strong>"下的评论：</p>
 					<blockquote>${escapeHtml(payload.replyContent)}</blockquote>
 					<p><a href="${payload.postUrl}">查看回复</a></p>
 					<p style="font-size:0.8em;color:#666;">您收到这封邮件，是因为您已开启帖子相关邮件提醒。</p>
+				`
+		})
+	},
+	{
+		key: 'article_update',
+		label: '文章更新通知',
+		requiredFields: ['summary', 'articleLinks'],
+		defaults: (_origin) => ({
+			summary: '文章更新摘要',
+			articleLinks: 'https://example.com/article'
+		}),
+		build: (payload) => ({
+			subject: `文章更新：${payload.summary}`,
+			html: `
+					<h1>文章更新通知</h1>
+					<p><strong>摘要：</strong>${escapeHtml(payload.summary)}</p>
+					<p><strong>链接：</strong></p>
+					<p>${payload.articleLinks}</p>
+					<p style="font-size:0.8em;color:#666;">您收到这封邮件，是因为您已开启文章更新邮件提醒。</p>
 				`
 		})
 	}
@@ -712,6 +731,7 @@ export default {
 					role: user.role || 'user',
 					totp_enabled: !!user.totp_enabled,
 					email_notifications: user.email_notifications === 1,
+					article_notifications: user.article_notifications === 1,
 					gender: user.gender ?? null,
 					bio: user.bio ?? null,
 					age: user.age ?? null,
@@ -922,7 +942,7 @@ export default {
 			try {
 				const userPayload = await authenticate(request);
 				const body = await request.json() as any;
-				const { username, avatar_url, email_notifications } = body;
+				const { username, avatar_url, email_notifications, article_notifications } = body;
 
 				const user_id = userPayload.id;
 
@@ -966,8 +986,13 @@ export default {
 					newEmailNotif = email_notifications ? 1 : 0;
 				}
 
-				await env.forum_db.prepare('UPDATE users SET username = ?, avatar_url = ?, email_notifications = ? WHERE id = ?')
-					.bind(newUsername, newAvatarUrl, newEmailNotif, user_id).run();
+				let newArticleNotif = currentUser.article_notifications;
+				if (article_notifications !== undefined) {
+					newArticleNotif = article_notifications ? 1 : 0;
+				}
+
+				await env.forum_db.prepare('UPDATE users SET username = ?, avatar_url = ?, email_notifications = ?, article_notifications = ? WHERE id = ?')
+					.bind(newUsername, newAvatarUrl, newEmailNotif, newArticleNotif, user_id).run();
 
 				const user = await env.forum_db.prepare(
 					`SELECT
@@ -993,6 +1018,7 @@ export default {
 						role: user.role || 'user',
 						totp_enabled: !!user.totp_enabled,
 						email_notifications: user.email_notifications === 1,
+						article_notifications: user.article_notifications === 1,
 						gender: user.gender ?? null,
 						bio: user.bio ?? null,
 						age: user.age ?? null,
@@ -2805,6 +2831,130 @@ export default {
 				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', String(postId || 'new'), { title_length: safeTitle.length }, request);
 
 				return jsonResponse({ success, id: postId }, 201);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/webhook/github (GitHub Webhook for article notifications)
+		if (url.pathname === '/api/webhook/github' && method === 'POST') {
+			try {
+				// Delay in seconds before sending notifications (for build time)
+				const NOTIFICATION_DELAY_SECONDS = parseInt(env.ARTICLE_NOTIFICATION_DELAY || '180', 10); // Default 3 minutes
+
+				// Verify GitHub signature
+				const signature = request.headers.get('X-Hub-Signature-256');
+				const secret = env.GITHUB_WEBHOOK_SECRET;
+				
+				if (secret && signature) {
+					const body = await request.clone().arrayBuffer();
+					const key = await crypto.subtle.importKey(
+						'raw',
+						new TextEncoder().encode(secret),
+						{ name: 'HMAC', hash: 'SHA-256' },
+						false,
+						['sign']
+					);
+					const sigBuffer = await crypto.subtle.sign('HMAC', key, body);
+					const expected = 'sha256=' + Array.from(new Uint8Array(sigBuffer))
+						.map(b => b.toString(16).padStart(2, '0'))
+						.join('');
+					
+					if (signature !== expected) {
+						return jsonResponse({ error: 'Invalid signature' }, 401);
+					}
+				}
+
+				const body = await request.json() as any;
+
+				// Handle GitHub Ping event
+				if (body.zen) {
+					return jsonResponse({ status: 'ok', message: 'pong' });
+				}
+
+				// Process push events
+				if (body.ref && body.commits) {
+					const commits = body.commits as Array<{
+						message: string;
+						added?: string[];
+						modified?: string[];
+						removed?: string[];
+						url: string;
+					}>;
+
+					// Filter commits starting with 'posts:' or 'update:'
+					const postsCommits = commits.filter(c =>
+						c.message.toLowerCase().startsWith('posts:')
+					);
+					const updateCommits = commits.filter(c =>
+						c.message.toLowerCase().startsWith('update:')
+					);
+
+					const messages: Array<{ summary: string; articleLinks: string }> = [];
+
+					// Process posts: commits (include article links)
+					for (const commit of postsCommits) {
+						const summary = commit.message.replace(/^posts:\s*/i, '').trim();
+						const articleUrls: string[] = [];
+
+						const files = [...(commit.added || []), ...(commit.modified || [])];
+						for (const file of files) {
+							if (file.startsWith('src/content/posts/')) {
+								const filename = file.replace('src/content/posts/', '').replace('.md', '');
+								articleUrls.push(`<a href="https://2x.nz/blog/${encodeURIComponent(filename)}">${escapeHtml(filename)}</a>`);
+							}
+						}
+
+						if (articleUrls.length > 0 || summary) {
+							messages.push({
+								summary: summary || '文章更新',
+								articleLinks: articleUrls.length > 0 ? articleUrls.join('<br>') : '<a href="https://2x.nz/blog">查看博客</a>'
+							});
+						}
+					}
+
+					// Process update: commits (summary only)
+					for (const commit of updateCommits) {
+						const summary = commit.message.replace(/^update:\s*/i, '').trim();
+						if (summary) {
+							messages.push({
+								summary,
+								articleLinks: '<a href="https://2x.nz/blog">查看博客</a>'
+							});
+						}
+					}
+
+					// Send emails with delay (for site build)
+					if (messages.length > 0) {
+						const sendNotifications = async () => {
+							// Wait for build to complete
+							await new Promise(resolve => setTimeout(resolve, NOTIFICATION_DELAY_SECONDS * 1000));
+							
+							const users = await env.forum_db.prepare(
+								'SELECT email FROM users WHERE verified = 1 AND article_notifications = 1'
+							).all<{ email: string }>();
+
+							if (users.results && users.results.length > 0) {
+								for (const msg of messages) {
+									for (const user of users.results) {
+										try {
+											await sendEmailByTemplate(user.email, 'article_update', {
+												summary: msg.summary,
+												articleLinks: msg.articleLinks
+											});
+										} catch (e) {
+											console.error(`Failed to send email to ${user.email}:`, e);
+										}
+									}
+								}
+							}
+						};
+						
+						ctx.waitUntil(sendNotifications());
+					}
+				}
+
+				return jsonResponse({ status: 'ok', delay: NOTIFICATION_DELAY_SECONDS });
 			} catch (e) {
 				return handleError(e);
 			}

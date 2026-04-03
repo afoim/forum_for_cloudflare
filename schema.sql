@@ -25,6 +25,7 @@ CREATE TABLE users (
   avatar_url TEXT,
   nickname TEXT,
   email_notifications INTEGER DEFAULT 1,
+  article_notifications INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

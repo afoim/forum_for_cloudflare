@@ -2889,6 +2889,19 @@ export default {
 			}
 		}
 
+		// GET /api/subscriptions/article-notifications
+		if (url.pathname === '/api/subscriptions/article-notifications' && method === 'GET') {
+			try {
+				const result = await env.forum_db.prepare(
+					'SELECT COUNT(*) as count FROM users WHERE verified = 1 AND article_notifications = 1'
+				).first();
+
+				return jsonResponse({ count: result?.count || 0 });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
 		if (!url.pathname.startsWith('/api')) {
 			return textResponse('Not Found', 404);
 		}

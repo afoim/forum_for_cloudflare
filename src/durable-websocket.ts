@@ -1,6 +1,5 @@
 export class ForumWebSocket {
 	private state: DurableObjectState;
-	private sessions: Map<WebSocket, { postId?: string; userId?: string }> = new Map();
 
 	constructor(state: DurableObjectState) {
 		this.state = state;
@@ -17,7 +16,11 @@ export class ForumWebSocket {
 			const postId = url.searchParams.get('postId') || undefined;
 			const userId = url.searchParams.get('userId') || undefined;
 
-			this.handleSession(server, { postId, userId });
+			// Use Hibernation API - allows the DO to sleep when idle
+			this.state.acceptWebSocket(server);
+
+			// Persist connection state that survives hibernation
+			server.serializeAttachment({ postId, userId });
 
 			return new Response(null, {
 				status: 101,
@@ -29,19 +32,24 @@ export class ForumWebSocket {
 		if (url.pathname === '/broadcast' && request.method === 'POST') {
 			const body = await request.json() as { postId: string; message: any };
 			this.broadcastToPost(body.postId, body.message);
-			return Response.json({ success: true, connections: this.sessions.size });
+			return Response.json({ success: true, connections: this.state.getWebSockets().length });
 		}
 
 		// HTTP API for status
 		if (url.pathname === '/status' && request.method === 'GET') {
 			const postConnections: Record<string, number> = {};
-			for (const [, data] of this.sessions) {
-				if (data.postId) {
-					postConnections[data.postId] = (postConnections[data.postId] || 0) + 1;
+			for (const ws of this.state.getWebSockets()) {
+				try {
+					const data = ws.deserializeAttachment() as { postId?: string; userId?: string } | null;
+					if (data?.postId) {
+						postConnections[data.postId] = (postConnections[data.postId] || 0) + 1;
+					}
+				} catch {
+					// Ignore closed connections
 				}
 			}
 			return Response.json({
-				totalConnections: this.sessions.size,
+				totalConnections: this.state.getWebSockets().length,
 				postConnections
 			});
 		}
@@ -49,94 +57,78 @@ export class ForumWebSocket {
 		return Response.json({ error: 'Not found' }, { status: 404 });
 	}
 
-	private handleSession(ws: WebSocket, data: { postId?: string; userId?: string }) {
-		ws.accept();
-		this.sessions.set(ws, data);
+	// Called when a WebSocket message is received
+	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+		const data = ws.deserializeAttachment() as { postId?: string; userId?: string } | null;
 
-		// Send connected message
-		ws.send(JSON.stringify({
-			type: 'connected',
-			payload: {
-				postId: data.postId,
-				connections: this.sessions.size
+		try {
+			const msg = JSON.parse(message as string);
+
+			switch (msg.type) {
+				case 'subscribe_post':
+					if (msg.payload?.postId) {
+						ws.serializeAttachment({ ...data, postId: String(msg.payload.postId) });
+						ws.send(JSON.stringify({
+							type: 'subscribed',
+							payload: { postId: msg.payload.postId }
+						}));
+					}
+					break;
+
+				case 'unsubscribe_post':
+					ws.serializeAttachment({ ...data, postId: undefined });
+					ws.send(JSON.stringify({
+						type: 'unsubscribed',
+						payload: { success: true }
+					}));
+					break;
+
+				case 'ping':
+					ws.send(JSON.stringify({ type: 'pong' }));
+					break;
 			}
-		}));
-
-		ws.addEventListener('message', (event) => {
-			try {
-				const msg = JSON.parse(event.data as string);
-				this.handleMessage(ws, msg);
-			} catch (e) {
-				console.error('WebSocket message parse error:', e);
-			}
-		});
-
-		ws.addEventListener('close', () => {
-			this.sessions.delete(ws);
-		});
-
-		ws.addEventListener('error', () => {
-			this.sessions.delete(ws);
-		});
+		} catch (e) {
+			console.error('WebSocket message parse error:', e);
+		}
 	}
 
-	private handleMessage(ws: WebSocket, msg: { type: string; payload?: any }) {
-		const data = this.sessions.get(ws);
-		if (!data) return;
+	// Called when a WebSocket closes
+	async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+		// Connection closed - the runtime will handle cleanup automatically
+	}
 
-		switch (msg.type) {
-			case 'subscribe_post':
-				if (msg.payload?.postId) {
-					data.postId = String(msg.payload.postId);
-					this.sessions.set(ws, data);
-					ws.send(JSON.stringify({
-						type: 'subscribed',
-						payload: { postId: data.postId }
-					}));
-				}
-				break;
-
-			case 'unsubscribe_post':
-				data.postId = undefined;
-				this.sessions.set(ws, data);
-				ws.send(JSON.stringify({
-					type: 'unsubscribed',
-					payload: { success: true }
-				}));
-				break;
-
-			case 'ping':
-				ws.send(JSON.stringify({ type: 'pong' }));
-				break;
-		}
+	// Called when a WebSocket has an error
+	async webSocketError(ws: WebSocket, error: unknown) {
+		console.error('WebSocket error:', error);
 	}
 
 	private broadcastToPost(postId: string, message: any) {
 		const payload = typeof message === 'string' ? message : JSON.stringify(message);
 		let sent = 0;
 
-		for (const [ws, data] of this.sessions) {
-			if (data.postId === String(postId)) {
-				try {
+		for (const ws of this.state.getWebSockets()) {
+			try {
+				const data = ws.deserializeAttachment() as { postId?: string; userId?: string } | null;
+				if (data?.postId === String(postId)) {
 					ws.send(payload);
 					sent++;
-				} catch (e) {
-					console.error('WebSocket send error:', e);
-					this.sessions.delete(ws);
 				}
+			} catch {
+				// Connection is closed, ignore
 			}
 		}
 
 		console.log(`[WebSocket] Broadcast to post ${postId}: ${sent} clients`);
 	}
 
+	// Broadcast to all connections
 	broadcast(message: any) {
 		const payload = typeof message === 'string' ? message : JSON.stringify(message);
-		for (const [ws] of this.sessions) {
+		for (const ws of this.state.getWebSockets()) {
 			try {
 				ws.send(payload);
-			} catch (e) {
-				this.sessions.delete(ws);
+			} catch {
+				// Connection is closed, ignore
 			}
 		}
 	}

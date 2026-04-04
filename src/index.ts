@@ -116,6 +116,7 @@ function escapeHtml(value: string): string {
 		.replace(/'/g, '&#39;');
 }
 
+const EMAIL_REPLY_HINT = '<p style="margin-top: 20px; padding: 15px; background-color: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 4px;"><strong>💡 提示：</strong>建议您回复该邮件以达成双向通讯，我们的邮件服务对于双向通讯客户无发邮限制。</p>';
 function isValidEmail(email: string): boolean {
 	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -128,7 +129,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 		defaults: () => ({}),
 		build: () => ({
 			subject: '测试邮件',
-			html: '<h1>测试邮件发送成功</h1><p>这是一封用于验证 SMTP 配置的测试邮件。</p>'
+			html: `<h1>测试邮件发送成功</h1><p>这是一封用于验证 SMTP 配置的测试邮件。</p>${EMAIL_REPLY_HINT}`
 		})
 	},
 	{
@@ -146,6 +147,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<a href="${payload.resetLink}">立即重置密码</a>
 					<p>如果这不是您本人操作，请忽略此邮件。</p>
 					<p>该链接将在 1 小时后失效。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -165,6 +167,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<p>请点击下方链接完成确认：</p>
 					<a href="${payload.verifyLink}">确认更换邮箱</a>
 					<p>如果这不是您本人操作，请忽略此邮件。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -183,6 +186,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<p>请点击下方链接验证您的邮箱地址：</p>
 					<a href="${payload.verifyLink}">立即验证邮箱</a>
 					<p>如果这不是您本人操作，请忽略此邮件。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -201,6 +205,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<p>请点击下方链接验证您的邮箱地址：</p>
 					<a href="${payload.verifyLink}">立即验证邮箱</a>
 					<p>如果这不是您本人操作，请忽略此邮件。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -215,6 +220,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<h1>头像已更新</h1>
 					<p>管理员已为您更新头像。</p>
 					<p>如果这不是您预期的操作，请及时联系管理员。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -231,6 +237,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<h1>用户名已修改</h1>
 					<p>您的用户名已被管理员修改为 <strong>${escapeHtml(payload.username)}</strong>。</p>
 					<p>如有疑问，请联系管理员。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -247,6 +254,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<h1>账户已验证</h1>
 					<p>您的账户（用户名：<strong>${escapeHtml(payload.username)}</strong>）已通过管理员手动验证。</p>
 					<p>您现在可以登录并使用全部功能。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -263,6 +271,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<h1>账户已删除</h1>
 					<p>您的账户（用户名：<strong>${escapeHtml(payload.username)}</strong>）已被管理员删除。</p>
 					<p>如果您认为这是误操作，请尽快联系管理员。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -275,14 +284,15 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 			postTitle: '示例帖子标题',
 			postUrl: 'https://2x.nz/forum/post/?id=1'
 		}),
-		build: (payload) => ({
+build: (payload) => ({
 			subject: `您的帖子已被管理员删除：${payload.postTitle}`,
 			html: `
 					<h1>帖子已删除</h1>
 					<p>${escapeHtml(payload.username)}，您好。</p>
-					<p>您发布的帖子“<strong>${escapeHtml(payload.postTitle)}</strong>”已被管理员删除。</p>
+					<p>您发布的帖子"<strong>${escapeHtml(payload.postTitle)}</strong>"已被管理员删除。</p>
 					<p>如需了解详情，请联系管理员。</p>
 					<p><a href="${payload.postUrl}">帖子原链接</a></p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -296,14 +306,15 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 			commentContent: '这是一条用于测试的新评论内容。',
 			postUrl: 'https://2x.nz/forum/post/?id=1'
 		}),
-		build: (payload) => ({
+build: (payload) => ({
 			subject: `您的帖子有新评论：${payload.postTitle}`,
 			html: `
 					<h1>您的帖子有新评论</h1>
-					<p><strong>${escapeHtml(payload.commenterName)}</strong> 评论了您的帖子“<strong>${escapeHtml(payload.postTitle)}</strong>”：</p>
+					<p><strong>${escapeHtml(payload.commenterName)}</strong> 评论了您的帖子"<strong>${escapeHtml(payload.postTitle)}</strong>"：</p>
 					<blockquote>${escapeHtml(payload.commentContent)}</blockquote>
 					<p><a href="${payload.postUrl}">查看评论</a></p>
 					<p style="font-size:0.8em;color:#666;">您收到这封邮件，是因为您已开启帖子相关邮件提醒。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -325,6 +336,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<blockquote>${escapeHtml(payload.replyContent)}</blockquote>
 					<p><a href="${payload.postUrl}">查看回复</a></p>
 					<p style="font-size:0.8em;color:#666;">您收到这封邮件，是因为您已开启帖子相关邮件提醒。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	},
@@ -344,6 +356,7 @@ const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
 					<p><strong>链接：</strong></p>
 					<p>${payload.articleLinks}</p>
 					<p style="font-size:0.8em;color:#666;">您收到这封邮件，是因为您已开启文章更新邮件提醒。</p>
+					${EMAIL_REPLY_HINT}
 				`
 		})
 	}

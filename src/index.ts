@@ -116,7 +116,7 @@ function escapeHtml(value: string): string {
 		.replace(/'/g, '&#39;');
 }
 
-const EMAIL_REPLY_HINT = '<p style="margin-top: 20px; padding: 15px; background-color: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 4px;"><strong>💡 提示：</strong>建议您回复该邮件以达成双向通讯，我们的邮件服务对于双向通讯客户无发邮限制。</p>';
+const EMAIL_REPLY_HINT = '<p style="margin-top: 20px; padding: 15px; background-color: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 4px;"><strong>💡 提示：</strong>建议您<a href="mailto:i@2x.nz?subject=%E5%8F%8C%E5%90%91%E9%80%9A%E8%AE%AF%E7%94%B3%E8%AF%B7&body=0" style="color: #3b82f6;">回复该邮件</a>以达成双向通讯，我们的邮件服务对于双向通讯客户无发邮限制。</p>';
 function isValidEmail(email: string): boolean {
 	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }

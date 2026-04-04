@@ -29,7 +29,13 @@
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["SSEHub"]
+			"new_sqlite_classes": ["ForumWebSocket"]
+		},
+		{
+			"tag": "v2",
+			"renamed_classes": [
+				{ "from": "ForumWebSocket", "to": "SSEHub" }
+			]
 		}
 	]
 }
